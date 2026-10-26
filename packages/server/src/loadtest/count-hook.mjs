@@ -13,7 +13,7 @@ export async function load(url, context, nextLoad) {
   let src = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
   if (process.env.SEARCH_HOOK_EXPANDED === '1') {
     const n = src.split('expanded++;').length - 1;
-    if (n !== 3) throw new Error(`count-hook: expected 3 'expanded++;' in pathfinding.ts, found ${n}`);
+    if (n !== 4) throw new Error(`count-hook: expected 4 'expanded++;' in pathfinding.ts, found ${n}`);
     src = 'globalThis.__pfExpanded = 0;\n' + src.replaceAll('expanded++;', 'expanded++; globalThis.__pfExpanded++;');
   }
   src += `\n;globalThis.__pfHook = { orig: { ${BIND.join(', ')} }, set: { ${BIND.map((n) => `${n}: (f) => { ${n} = f; }`).join(', ')} } };\n`;
