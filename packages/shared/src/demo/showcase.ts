@@ -1005,7 +1005,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   'traffic-panel': {
     title: 'The Traffic panel',
-    what: 'Who is on the roads and why it is slow. The panel (from the overlays menu) counts the cars on the road now by who drives them: residents, visitors, lorries, buses and services. It lists arrivals by gateway, the five junctions where most drivers gave up, and the three longest queues; click one to go there. With the congestion overlay on, hover a red road: the tooltip says what holds its cars (the car ahead, a red light, waiting for a gap, the box ahead blocked, parking, a turn) and how many are visitors and lorries, who are most of the load.',
+    what: 'Who is on the roads and why it is slow. The panel (from the overlays menu) counts the cars on the road now by who drives them: residents, visitors, lorries, buses and services. It lists arrivals by gateway, the five junctions where most drivers gave up, and the three longest queues; click one to go there. With the congestion overlay on (each road coloured by how held up its cars are, green to red), hover a red road: the tooltip says what holds its cars (the car ahead, a red light, waiting for a gap, the box ahead blocked, parking, a turn) and how many are visitors and lorries, who are most of the load.',
     how: 'Overlays (H) › Traffic panel…; hover a red road with the congestion overlay on.',
     facts: [['Opens from', 'the overlays menu'], ['Costs the server', 'nothing while it is closed: it asks every few seconds while open'], ['Shapes the load', 'street rules, the visitor limit, the lorry curfew']],
   },
