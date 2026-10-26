@@ -109,7 +109,12 @@ const CROSSING_DELAY = 1.5;
 /** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
 const BASCULE_UP_COST = 25;
 
-interface Cong { v: number; at: number }
+/**
+ * A road tile's congestion state (docs/traffic-tuning.md "Congestion"): moving averages, per tick, of the cars held on
+ * the tile (`s`) and of the cars on it (`n`), as of the end of tick `at`. A tick nobody drove on the tile counts as a
+ * tick with no cars, so between visits both fall by (1 - EMA_ALPHA) a tick. Runtime state only: never saved.
+ */
+interface Cong { s: number; n: number; at: number }
 /**
  * The router's cost of one chunk's tiles, as dense arrays (docs/search-perf.md): Traffic.cost is called for every tile
  * every A* search looks at. `cong` is congestionAt as it was first read in epoch `at` (a new epoch each tick and after
@@ -260,8 +265,18 @@ export function crossMask(xd: number): number {
   return isEW(xd) ? CROSS_NS_ROAD : CROSS_EW_ROAD; // walking east-west takes you over the north-south road
 }
 
-const EMA_ALPHA = 0.08;
-const DECAY_TAU = 75;
+/**
+ * The congestion averages' weight on each tick (docs/traffic-tuning.md "Congestion"): about a 33-tick memory, a signal
+ * cycle of two phases, so a queue that moves off on each green reads as the jam it is instead of swinging with the lights.
+ */
+const EMA_ALPHA = 0.03;
+/**
+ * Cars a tick at which a tile counts as full: a queue spaced a car a tile, creeping forward, has about 0.85. With fewer,
+ * the held cars weigh as a share of this many, so a lone car held at a red light reads about 0.35-0.5 at most and fades.
+ */
+const CONG_FULL = 0.75;
+/** The fraction left of a tile's congestion averages `gap` ticks after the last tick they took in (empty ticks count as zero). */
+const congFade = (gap: number) => (gap <= 0 ? 1 : Math.pow(1 - EMA_ALPHA, gap));
 const STOP_MARGIN = 0.03;
 /**
  * The longest vehicle that, waiting at the stop line of a junction straight after a level crossing (its nose
@@ -486,8 +501,9 @@ export const conflictsForStrands = conflictsS;
  * Drivers follow the car ahead bumper to bumper plus a personal gap, stop at
  * the edge of the next tile until they may enter it (room beyond the box, no
  * conflicting movement already in it, no pedestrian on the crossing, a green
- * light where there are signals), and never overtake. Per-tile occupancy
- * feeds a congestion average used for routing, the heat overlay and tooltips.
+ * light where there are signals), and never overtake. Per tile, how held up
+ * its cars are (congestionAt: the share of them held, over the last few dozen
+ * ticks) is used for routing, the heat overlay and tooltips.
  */
 export class Traffic {
   private cells = new Map<number, Mover[]>();
@@ -570,12 +586,14 @@ export class Traffic {
   endTick() {
     const tick = this.w.tick;
     for (let j = 0; j < this.presKeys.length; j++) {
+      // congestion is how held up the tile's cars are: the held share of them, with fewer than CONG_FULL cars a tick
+      // weighing as a share of that
       const k = this.presKeys[j], rc = this.presRc[j], n = rc.pres[this.presIdx[j]], st = rc.stop[this.presIdx[j]];
-      const target = Math.min(1, (n * 0.25 + st * 0.75) / (2 * TT.laneCap));
       const c = rc.cong[this.presIdx[j]];
-      const prev = c ? c.v * Math.exp(-(tick - c.at) / DECAY_TAU) : 0;
-      const v = prev + (target - prev) * EMA_ALPHA;
-      if (c) { c.v = v; c.at = tick; } else { const nc = { v, at: tick }; this.cong.set(k, nc); rc.cong[this.presIdx[j]] = nc; }
+      if (c) {
+        const f = congFade(tick - c.at - 1);
+        c.s = c.s * f + (st - c.s * f) * EMA_ALPHA; c.n = c.n * f + (n - c.n * f) * EMA_ALPHA; c.at = tick;
+      } else { const nc = { s: st * EMA_ALPHA, n: n * EMA_ALPHA, at: tick }; this.cong.set(k, nc); rc.cong[this.presIdx[j]] = nc; }
       this.dirty.add(k);
     }
     this.congEpoch++; // the router's cached congestion is stale now
@@ -585,13 +603,18 @@ export class Traffic {
 
   // ---- congestion -------------------------------------------------------------
 
+  /**
+   * How held up the cars on road tile (x, y) are, 0..1 (docs/traffic-tuning.md "Congestion"): of the cars on it over
+   * the last few dozen ticks, the share held (moving under 30% of free speed, the HUD's "queued"), with fewer than
+   * CONG_FULL cars a tick weighing as a share of that. 1 is a standstill; a signal approach held half the time reads about 0.5.
+   */
   congestionAt(x: number, y: number): number {
     const rc = this.roadChunkIf(x, y);
     const c = rc?.cong[localIndex(x, y)];
     if (!c) return 0;
-    const v = c.v * Math.exp(-(this.w.tick - c.at) / DECAY_TAU);
-    if (v < 0.004) { this.cong.delete(tkey(x, y)); rc!.cong[localIndex(x, y)] = undefined; this.dirty.add(tkey(x, y)); return 0; }
-    return v;
+    const f = congFade(this.w.tick - c.at - 1);
+    if (c.n * f < 0.004) { this.cong.delete(tkey(x, y)); rc!.cong[localIndex(x, y)] = undefined; this.dirty.add(tkey(x, y)); return 0; }
+    return (c.s * f) / Math.max(c.n * f, CONG_FULL);
   }
   cost(x: number, y: number): number {
     const cx = chunkOf(x), cy = chunkOf(y);
@@ -659,7 +682,7 @@ export class Traffic {
   }
   sweep() {
     const tick = this.w.tick;
-    for (const [k, c] of this.cong) if (c.v * Math.exp(-(tick - c.at) / DECAY_TAU) < 0.004) {
+    for (const [k, c] of this.cong) if (c.n * congFade(tick - c.at - 1) < 0.004) {
       this.cong.delete(k); this.dirty.add(k);
       const x = tileX(k), y = tileY(k);
       this.roadChunkIf(x, y)!.cong[localIndex(x, y)] = undefined;
@@ -2304,11 +2327,12 @@ export class Traffic {
       if (md > 1e-2) { const h = this.motion.get(m); if (h) { h[0] = mx / md; h[1] = my / md; } else this.motion.set(m, [mx / md, my / md]); }
     }
 
-    const rc = this.roadChunk(ax, ay), ri = localIndex(ax, ay);
-    if (rc.presAt[ri] !== this.presStamp) { rc.presAt[ri] = this.presStamp; rc.pres[ri] = 0; rc.stop[ri] = 0; this.presKeys.push(tkey(ax, ay)); this.presRc.push(rc); this.presIdx.push(ri); }
-    rc.pres[ri]++;
-    // the second leg of a fast car's move is the same car in the same tick: counted once, by the first
+    // the second leg of a fast car's move is the same car in the same tick: counted once, by the first, on the tile it
+    // started the tick on (so a tile's cars and its held cars, the congestion's inputs, are the same cars)
     if (!again) {
+      const rc = this.roadChunk(ax, ay), ri = localIndex(ax, ay);
+      if (rc.presAt[ri] !== this.presStamp) { rc.presAt[ri] = this.presStamp; rc.pres[ri] = 0; rc.stop[ri] = 0; this.presKeys.push(tkey(ax, ay)); this.presRc.push(rc); this.presIdx.push(ri); }
+      rc.pres[ri]++;
       if (moved < base * 0.3) { rc.stop[ri]++; this.queued++; }
       this.vehicles++; this.speedSum += Math.min(1, moved / (DRIVE_SPEED * m.speedMul));
       if (moved < 0.02) { m.wait++; if (!m.dwell) m.stuck++; } else m.wait = 0; // a bus dwelling at a stop is not stuck

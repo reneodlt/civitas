@@ -256,8 +256,8 @@ function fingerprint(w: World, traffic: Traffic): string {
     str(String(x.state)); word(x.job ? 1 : 0); if (typeof x.money === 'number') num(x.money);
   }
   for (const v of w.vehicles.values()) { mover(v); str(String((v as unknown as { phase?: string }).phase)); }
-  const t = traffic as unknown as { cong: Map<number, { v: number; at: number }>; dirty: Set<number> };
-  for (const [k, c] of t.cong) { num(k); num(c.v); num(c.at); }
+  const t = traffic as unknown as { cong: Map<number, { s: number; n: number; at: number }>; dirty: Set<number> };
+  for (const [k, c] of t.cong) { num(k); num(c.s); num(c.n); num(c.at); }
   for (const [k, v] of Object.entries(traffic.counters)) { str(k); num(v); }
   num(traffic.lastVehicles); num(traffic.lastQueued); num(traffic.lastSpeedPct); num(t.dirty.size);
   for (const p of w.players.values()) num((p as unknown as { money: number }).money);
