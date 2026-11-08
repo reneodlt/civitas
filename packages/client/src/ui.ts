@@ -792,7 +792,8 @@ export class UI {
     const tip = $('tip');
     const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const pct = Math.round(info.congestion * 100);
-    const grade = pct < 15 ? 'flowing' : pct < 40 ? 'busy' : pct < 70 ? 'congested' : 'jammed';
+    // the congestion is how held up the tile's cars are (Traffic.congestionAt: the share of them held), not how many there are
+    const grade = pct < 15 ? 'flowing' : pct < 40 ? 'slow' : pct < 70 ? 'congested' : 'jammed';
     // the street's name leads (server/src/streets.ts); a crossroads or a bend names both streets
     const [st, other] = info.streets ?? [];
     const what = info.bridge ? 'Bridge' : info.cls ? `${classDef(info.cls).title}` : 'Road';

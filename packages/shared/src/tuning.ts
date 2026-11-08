@@ -148,13 +148,20 @@ export const TRAFFIC_TUNING = {
    * wait in the garage rather than in the forecourt (where they block cars arriving from the building's other side).
    */
   spawnClear: 2,
-  /** Ramp metering: a car leaves a building only while the congestion of the road tile outside is below this (0..1; 1: always). */
+  /**
+   * Ramp metering: a car leaves a building only while the congestion of the road tile outside (Traffic.congestionAt: the
+   * share of its cars held up, 0..1) is below this (1: always).
+   */
   meterCongestion: 1,
   /** Lane admission: 0 a fixed count (laneCap); 1 by length, sum of (length + MIN_GAP) of the cars in the lane plus the newcomer within laneRoom. */
   laneByLength: 0,
   laneCap: 2,
   laneRoom: 1.0,
-  /** Route cost of a fully congested tile on top of the empty-road cost of 1 (drivers route round jams by this). */
+  /**
+   * Route cost of a fully congested tile on top of the empty-road cost of 1 (drivers route round jams by this). Congestion
+   * is how held up the tile's cars are (Traffic.congestionAt), so a standstill costs about 8 more and a busy street whose
+   * cars keep moving nothing more (docs/traffic-tuning.md "Congestion": ab.ts kept 8 when the meaning changed).
+   */
   congestionWeight: 8,
 
   // ---- pedestrians and crossings ------------------------------------------------------------

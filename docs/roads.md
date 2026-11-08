@@ -363,6 +363,11 @@ a road's right-click menu has the four, each on or off along the street through 
 - **Freight routing.** Lorries cost a route as cars do, but a 20 zone costs them half as much again and a ban is a wall,
   so industry's lorries keep to the roads that are theirs.
 
+**The congestion overlay** colours each road tile by how held up its cars are (`Traffic.congestionAt`: of the cars on
+it over about the last 30 ticks, the share held, moving under 30% of free speed; fewer than 0.75 cars a tick weigh as a
+share of that): green flowing, yellow a signal approach held about half the time, red a standstill (docs/traffic-tuning.md
+"Congestion"). Routing reads the same number.
+
 **Why it is slow.** With the congestion overlay on, hovering a road's tooltip adds "Why it is slow": the cars held on the
 tile by cause, from the same tests the entry rules make (`Traffic.whyHeld`: following the car ahead in its lane, held at
 a red light, waiting for a gap, the box ahead blocked, getting into the destination or looking for parking, slowed for a
