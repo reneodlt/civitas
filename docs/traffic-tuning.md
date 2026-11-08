@@ -41,7 +41,7 @@ npx tsx packages/server/src/loadtest/ab-why.ts --hour 8 --ticks 1500 --stuckmap 
 What is measured:
 
 - **Speed**: distance driven per tick as a share of each car's free speed, averaged over all cars on the road.
-- **Queued**: share of car-ticks moving at under 30% of free speed (the same test as the congestion overlay).
+- **Queued**: share of car-ticks moving at under 30% of free speed (the same test as the congestion overlay's "held": section Congestion).
 - **Give-ups**: trips ended by the stuck rule (a citizen sent home, a truck, visitor or patrol removed), counted
   in `Traffic.counters` (read-only). "In a box" is the subset removed while inside a junction tile. Cars that never
   get out of their garage are not counted: they were never on the road.
@@ -257,7 +257,8 @@ All in `TRAFFIC_TUNING`; each is documented where it is defined.
 - `signalPeriod: 15`, shared with the client: lamps change about every 3 real seconds, ±20% per junction.
 - `pedSignalPatient: 1`: at lights, never across a red or into a busy box.
 - `congestionWeight: 8`: a fully congested tile costs 9 instead of 5 when routing, so drivers use alternatives
-  sooner.
+  sooner. (Since 2026-10-26 congestion is how held up a tile's cars are, section Congestion: a standstill reads about 1,
+  a busy street that flows 0; 8 was kept.)
 - Unchanged: `signalT: 1`, `carYieldMax: 15`, `crossingWaitMax: 20`, `crossingLag: 1`, `pedPriority: 0`,
   `laneCap: 2`, `boxClear: 0`, `signalActuated: 0`.
 
@@ -1067,3 +1068,104 @@ The last row is the price: the old motorway never carried what was offered (cars
 The motorways were already jammed on main (62% of their cars standing): the queues are the street junctions where the M4 and the A13 end, and the share waiting for a gap at a slip's mouth fell. The avenue count moves with the chaos of a whole city (a different run of the same save differs by about as much).
 
 **Client.** The picker prints 250% speed. The cab's dial reads to 200 km/h (a motorway car is 130 to 165). The ride's engine keeps its old mapping up to 3.6 tiles a second (every street ride sounds as it did): above that a car's or lorry's ride speed goes past 1, to 1.6, so a motorway reads as faster than the top of a street (`KNEE` in `audio/fpv.ts`; the synthesis follows to 1.6). `render/glide.ts` draws a car between ticks on a cubic from one tick's position to the next. `loadtest/motorway.ts` draws exit and entry trips through it and measures the distance from the lane's own centre line: 0.062 tiles on the entry; on the two exits 0.145 and 0.126 at the worst frame, which sits where the car changes lane ten tiles before the slip, not at its bend (a lane change is a tile-long ease across 0.38 tiles that a 1.4-tile step cuts); 0.066 at most for the same trips at the old pace.
+
+## Congestion (UTD card 62b58b5c, 2026-10-26)
+
+Rich, on UAT: "traffic is absolutely snarled up yet the overlay is hardly orange". The overlay's ramp (green 0, yellow
+0.5, red 1) was right; the number under it was not.
+
+**The old formula** (`Traffic.endTick`): one moving average per tile of `min(1, (n * 0.25 + st * 0.75) / (2 * laneCap))`,
+n the cars on the tile this tick and st those held (moving under 30% of free speed, the HUD's "queued"), EMA 0.08 a tick,
+with a 75-tick decay applied on every update. That is how full the tile is against four cars (two lanes of two), not how
+held up its cars are. A one-way standstill holds two cars a tile at most, so a dead stop read 0.5 at best (yellow); a
+queue spaced a car a tile read 0.25 (green). The decay on every update also left a steady target reading only 0.87 of
+itself. The same number weights routing, so drivers under-rated jams as well.
+
+**The new one.** Each tile keeps two moving averages, per tick, of its held cars S and of its cars N (`Cong { s, n, at }`,
+runtime state, never saved). A tick nobody drove on the tile counts as a tick with no cars, so between visits both fall by
+`1 - EMA_ALPHA` a tick; that replaces the separate decay. Then
+
+    congestion = S / max(N, CONG_FULL)        EMA_ALPHA 0.03, CONG_FULL 0.75 cars a tick
+
+the share of the tile's cars that are held, with fewer than 0.75 cars a tick weighing as a share of that. A standstill
+reads 0.9 to 1 (red); a signal approach held half the time reads about 0.5 (yellow); a busy street whose cars keep moving
+reads 0 (green); a lone car held at a red light on a quiet road reads about 0.35 at its highest and fades as it leaves.
+A fast car's second leg (motorways) is no longer counted as a car on the tile it reaches, so N and S count the same cars:
+one each a tick, on the tile it started the tick on.
+
+**Why not the per-tick target `(st / n) * min(1, n / laneCap)`** (the card's first proposal) with the old average. Measured
+by shadow averages fed the same per-tick counts on the UAT save: it lifted the standstill tiles reading 0.6 or more from 0
+of 55 to 14. Two things held it down. A queue moves off on every green, which drops the target to 0 for a few ticks, and
+an 0.08 average (a 12-tick memory) follows that down by 0.4 within ten ticks: the overlay swung with the lights. And a
+queue spaced a car a tile (most of them: 37 of the 55 standstill tiles carry under 1.5 cars a tick) is capped at 0.5 by
+`n / laneCap`. A 0.03 average (about 33 ticks, one signal cycle of two phases) carries a queue through its green; averaging
+the counts and dividing, rather than averaging a per-tick ratio, lets an empty tick lower the presence without reading as
+"free"; and full at 0.75 cars a tick counts a queue a car a tile as the jam it is.
+
+| shadow average on the UAT save, warm 150, span 60 | standstill tiles at 0.6+ | the twelve busiest at 0.75+ | back-and-forth on held tiles |
+| --- | --- | --- | --- |
+| main: fullness, EMA 0.08 | 0 of 55 | 0 | 0.08 |
+| held share × min(1, n / laneCap), EMA 0.08 | 14 of 55 | 2 | swings with the lights (range 0.39) |
+| S / max(N, 1), EMA 0.03 | 53 of 55 | 10 | 0 |
+| **S / max(N, 0.75), EMA 0.03 (kept, in the sim)** | **48 of 48** | **12** | **0** |
+
+**The probe**: `packages/server/src/loadtest/congestion-probe.ts --load SAVE [--warm 150 --span 60] [--json FILE] [--check]`
+(or `--demo london`, `--districts N`). Per driven tile over the span: cars a tick, the share held, the ticks with a car
+and the congestion value; the table below, the twelve busiest standstill tiles, signal approaches, the lag (ticks from a
+queue forming to 0.5) and flicker. `--check` fails unless 90% of the tiles held 70%+ of the time with 0.8+ cars a tick
+read 0.6+, the twelve busiest 0.75+ (or within 0.1 of a held share under 0.85, since the value is that share), tiles held
+under 10% read under 0.2, and no standstill tile held through the last ten ticks goes back and forth by 0.1. Its range
+over them is printed too: a jam still forming or easing moves steadily, which is not flicker.
+
+**On the UAT save** (marg's city, 1,942 citizens), warm 150, span 60, tiles with a car at least a tick in four; rows how
+held up their cars were, columns the value at the end of the span:
+
+| main | <0.2 | 0.2-0.4 | 0.4-0.6 | 0.6-0.75 | 0.75+ |
+| --- | --- | --- | --- | --- | --- |
+| held 70%+ | 31 | 42 | 6 | 0 | 0 |
+| held 40-70% | 43 | 7 | 0 | 0 | 0 |
+| held 10-40% | 33 | 0 | 0 | 0 | 0 |
+| held <10% | 53 | 0 | 0 | 0 | 0 |
+
+| this branch | <0.2 | 0.2-0.4 | 0.4-0.6 | 0.6-0.75 | 0.75+ |
+| --- | --- | --- | --- | --- | --- |
+| held 70%+ | 1 | 4 | 4 | 13 | 50 |
+| held 40-70% | 6 | 24 | 22 | 19 | 1 |
+| held 10-40% | 12 | 6 | 0 | 0 | 0 |
+| held <10% | 56 | 0 | 0 | 0 | 0 |
+
+| UAT save | main, 150/60 | branch, 150/60 | main, 300/120 | branch, 300/120 |
+| --- | --- | --- | --- | --- |
+| vehicles, queued, speed | 173, 57%, 36% | 168, 57%, 35% | 257, 74%, 21% | 250, 63%, 30% |
+| standstill tiles (held 70%+, 0.8+ cars a tick) reading 0.6+ | 0 of 55 | 48 of 48 | 0 of 130 | 80 of 89 |
+| the twelve busiest | 0.22-0.52 | 0.71-0.95 | 0.28-0.45 | 0.67-0.96 |
+| tiles held under 10% reading 0.2+ | 0 of 53 | 0 of 56 | 0 of 6 | 0 of 21 |
+| signal approaches held 40-65% of the time (0.8+ cars a tick) | 0.11-0.15 | 0.49-0.57 | 0.14-0.28 | 0.45-0.78 |
+| lag, a queue forming to 0.5: median, p90 (ticks) | 7, 26; 7 queues never got there | 3, 6 | 8, 14; 23 never | 4, 6 |
+| back-and-forth on standstill tiles over ten ticks, max | 0.08 | 0 | 0.03 | 0 |
+
+At 300/120 the branch is one tile short of 90% (80 of 89): those tiles carry 0.8 to 0.9 cars a tick held 70 to 75% of
+the time, reading 0.55 to 0.6. The longer run also shows routing with a true number: drivers who see the jams go round
+them, 63% queued against 74%.
+
+**Routing.** `congestionWeight` stays 8: a standstill now costs about 9 a tile (it was about 5), a busy street whose cars
+keep moving 1 (it was 2 to 3). `ab.ts`, 08:00 + 1,500 ticks, seeds 1-6, means:
+
+| | trips | trip mean (ticks) | driven leg mean | commute | queued | speed | give-ups | re-routes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| main | 1,902 | 81.7 | 96.5 | 81.9 | 67.2% | 25.9% | 431 | 223 |
+| this branch | 1,933 (+1.6%) | 80.9 (-0.9%) | 94.5 (-2.1%) | 79.2 (-3.4%) | 66.0% | 26.7% | 413 (-4.2%) | 281 (+26%) |
+| congestionWeight 6 | 1,906 | 82.0 | 95.1 | 84.8 | 67.2% | 25.7% | 444 | 265 |
+| congestionWeight 4 | 1,924 | 80.8 | 95.7 | 83.5 | 66.1% | 26.6% | 405 | 234 |
+
+More drivers re-route (the jam they are in now costs more than the way round), and trips are a little shorter; 8 is as good
+as 4 or 6 and the best on commutes, so it stays. The re-route thresholds compare route costs (a new way at under 0.85 of
+the rest of the current one), not congestion values, so they need nothing. `meterCongestion` (off at 1) is a congestion
+threshold; with the new meaning 0.5 would hold cars in their garages while half the road outside is held.
+
+LONDON_ROWS
+
+**Other readers.** The overlay byte (`net.ts`, 255 × congestionAt) and the client's ramp are as they were. The road
+tooltip grades flowing under 15%, slow (was "busy") to 40%, congested to 70%, jammed above. The TV's 430 TRAVEL page lists
+tiles at byte 150+ as jams and 220+ as standstill: the old number seldom reached either. Road wear (`render/roads.ts`)
+follows a slow average of the same bytes: busy roads whose traffic flows no longer wear, held ones wear faster.
