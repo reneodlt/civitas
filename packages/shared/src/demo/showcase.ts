@@ -65,7 +65,7 @@ import { withTourSound, tourSoundProblems, type TourSound } from './tourSound';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
+export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance' | 'days-out'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube'
   // a sample city on the city-map kit (citydemo.ts): each city's own, built from its CityDemo
   | 'city-areas' | 'city-landmarks' | 'city-transit' | 'city-roads';
@@ -642,6 +642,31 @@ export const SECTIONS: DemoSection[] = [
     ],
   },
   {
+    id: 'days-out', name: 'Days out',
+    blurb: 'Five blocks of district C2 given over to the free-time places (docs/leisure.md): a funfair whose Ferris wheel turns over the town, a lido, an ice rink, allotments and a fishing lake, a city farm, an aquarium, a planetarium and a science centre, a concert hall beside a nature reserve, tennis, bowling, go-karts and a trampoline park, and a row of small places from a playground to an escape room. Follow anyone who goes there and look through their eyes: a gondola above the town, the lido from the water, a kart on the track.',
+    // district C2 (1, 2): blocks 1-3 of its first row and 1-2 of its third; no other section uses them
+    clear: [block(1, 2, 1, 0), block(1, 2, 2, 0), block(1, 2, 3, 0), block(1, 2, 1, 2), block(1, 2, 2, 2)],
+    placements: [
+      // the funfair fills the north-west of its block, facing the street to the north; small places round the rest
+      { kind: 'funfair', door: [-4, 14], rot: 2 },
+      { kind: 'playground', door: [-5, 17] }, { kind: 'skate-park', door: [-4, 17] }, { kind: 'observatory', door: [-3, 17] },
+      { kind: 'roller-disco', door: [-2, 17] }, { kind: 'climbing-centre', door: [-2, 16] }, { kind: 'art-gallery', door: [-2, 15] },
+      { kind: 'pottery-studio', door: [-2, 14] },
+      // four two-by-twos in each corner of the next two blocks, facing the streets north and south
+      { kind: 'lido', door: [1, 14], rot: 2 }, { kind: 'ice-rink', door: [3, 14], rot: 2 },
+      { kind: 'allotments', door: [0, 17], rot: 0 }, { kind: 'fishing-lake', door: [2, 17], rot: 0 },
+      { kind: 'city-farm', door: [6, 14], rot: 2 }, { kind: 'aquarium', door: [8, 14], rot: 2 },
+      { kind: 'planetarium', door: [5, 17], rot: 0 }, { kind: 'science-centre', door: [7, 17], rot: 0 },
+      // the concert hall and tennis on the north street, a trampoline park on the east, the nature reserve to the south
+      { kind: 'concert-hall', door: [-4, 24], rot: 2 }, { kind: 'tennis-club', door: [-2, 24], rot: 2 },
+      { kind: 'trampoline-park', door: [-2, 26], rot: 1 }, { kind: 'nature-reserve', door: [-4, 27], rot: 0 },
+      { kind: 'arcade', door: [-2, 27] },
+      // go-karts on the north street, bowling on the south, three small places on the east
+      { kind: 'go-kart-track', door: [1, 24], rot: 2 }, { kind: 'bowling-alley', door: [0, 27], rot: 0 },
+      { kind: 'dance-hall', door: [3, 24] }, { kind: 'board-game-cafe', door: [3, 25] }, { kind: 'escape-room', door: [3, 26] },
+    ],
+  },
+  {
     id: 'media', name: 'Media',
     blurb: 'A local TV studio, a broadcast centre and a media centre with the news helicopter\'s pad on its tower, on the north row of district B3: the town\'s channel, reporting the fire drill and the town\'s big days in the News panel (docs/media.md).',
     clear: [block(2, 1, 0, 0), block(2, 1, 1, 0)],
@@ -833,6 +858,9 @@ export const TOUR: string[] = [
   'studio-theatre', 'theatre', 'opera-house',
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
+  'funfair', 'playground', 'skate-park', 'lido', 'ice-rink', 'allotments', 'fishing-lake', 'city-farm', 'aquarium', 'planetarium', 'science-centre',
+  'observatory', 'concert-hall', 'nature-reserve', 'tennis-club', 'go-kart-track', 'bowling-alley', 'trampoline-park', 'roller-disco', 'climbing-centre',
+  'art-gallery', 'pottery-studio', 'dance-hall', 'arcade', 'board-game-cafe', 'escape-room',
   'tv-studio', 'broadcast-centre', 'media-centre', 'news-heli', 'live-tv',
   'funeral-director', 'funeral', 'churchyard', 'municipal-cemetery', 'garden-cemetery', 'crematorium',
   'gas-plant', 'coal-plant', 'wind-turbine', 'solar-farm', 'grid-supply-point', 'substation', 'power-pylons', 'power-buried', 'power-depot', 'power-blackout',
@@ -848,11 +876,11 @@ export const TOUR: string[] = [
 /** The sections every sample city on the kit seeds (citydemo.ts cityScenario). */
 const CITY_SECTIONS: SectionId[] = ['city-areas', 'city-landmarks', 'city-transit', 'city-roads'];
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'roads', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'power', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'roads', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'days-out', 'media', 'power', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
-  { id: 'leisure', name: 'Leisure demo', slot: 92, sections: ['downtown', 'leisure'],
+  { id: 'leisure', name: 'Leisure demo', slot: 92, sections: ['downtown', 'leisure', 'days-out'],
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic', 'remembrance'],
     blurb: 'Health, police, fire and builders, every size.' },

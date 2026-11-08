@@ -390,6 +390,7 @@ export class Net {
   }
   private lastLines = '';
   private lastStats = ''; private lastBuses = ''; private statsAt = 0;
+  private lastVenues = ''; private venuesAt = 0;
   /** Create, replace or delete one of your lines; everyone gets the new list. */
   private editLine(c: Client, m: { op: 'save'; line: Partial<TransitLine> } | { op: 'delete'; id: number } | { op: 'preview'; line: Partial<TransitLine>; seq: number }) {
     const p = c.player!;
@@ -1365,6 +1366,14 @@ export class Net {
     });
   }
 
+  /** Who is at each leisure place (ServerMsg 'venues'): when the counts change, and every ten seconds for anyone just joined. */
+  sendVenues() {
+    const w = this.w, v = this.sim.venueGuests(), sig = v.join(',');
+    if (sig === this.lastVenues && w.tick - this.venuesAt < 50) return;
+    this.lastVenues = sig; this.venuesAt = w.tick;
+    this.broadcast({ t: 'venues', v });
+  }
+
   flush() {
     const w = this.w;
     // under bytes (tunnels and platforms, docs/underground.md): nothing on the surface reads them, so they only need to beat the tile words
@@ -1508,7 +1517,7 @@ export class Net {
       this.lastLines = full;
       if (out) for (const c of this.clients) if (c.player && c.conn.open) c.conn.send(out);
     }
-    if (w.tick % 5 === 0) this.sendStats();
+    if (w.tick % 5 === 0) { this.sendStats(); this.sendVenues(); }
     // notices from the simulation for one owner's screen (sim/gateways.ts: newcomers with no gateway to come through; that one is an advisor hint)
     // the first settlers on a player's land (sim/firstfive.ts): the camera moment, once per player (goals.ts)
     if (this.sim.start.settlers.length) for (const st of this.sim.start.settlers.splice(0)) for (const c of this.clients) if (c.player?.id === st.owner && this.onboarding) {

@@ -2,13 +2,16 @@
  * Leisure probe: a fresh test city with a park, a cinema and a library placed on Commons land, fast-forwarded,
  * printing arrivals per venue type by hour of day, the mean leisure need and the happiness reasons.
  *
- *   npx tsx packages/server/src/loadtest/leisure.ts [--districts 1] [--days 2] [--warmup 1] [--built 3] [--seed 1] [--ages 6-90]
+ *   npx tsx packages/server/src/loadtest/leisure.ts [--districts 1] [--days 2] [--warmup 1] [--built 3] [--seed 1] [--ages 6-90] [--new]
+ *
+ * `--new` also places the free-time places (docs/leisure.md): eleven one-tile ones along the first street and a funfair,
+ * a lido, an aquarium and an ice rink as built structures, so their arrivals show beside the park, cinema and library.
  *
  * The first `--warmup` days fill the city (it starts empty) and are not counted; the next `--days` are.
  * `--ages lo-hi` re-ages everyone after the warm-up (a fresh city is all 18-45 year olds), so children and
  * retirees show up; children found working are let go.
  */
-import { TICKS_PER_DAY, Zone, isRoad, packTile, terrainOf, LifeStage, leisureAt, KIND_NAMES, KIND_ID, familyOf, subFor } from '@msimcity/shared';
+import { TICKS_PER_DAY, Zone, isRoad, packTile, terrainOf, LifeStage, leisureAt, KIND_NAMES, KIND_ID, familyOf, subFor, placedFromDoor } from '@msimcity/shared';
 import { World } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
@@ -27,6 +30,9 @@ const sim = new Simulation(w);
 // place the three on Commons land: tiles next to a road, replacing whatever stands there, spread across the district
 const d0 = layout.districts[0];
 const wanted: [string, number, number][] = [['park', 6, 2], ['cinema', 11, 8], ['library', 4, 17]];
+// --new: the one-tile free-time places on the lots along the first street (y 1 faces the road on y 0)
+const NEW_SMALL = ['playground', 'skate-park', 'roller-disco', 'climbing-centre', 'observatory', 'art-gallery', 'pottery-studio', 'dance-hall', 'arcade', 'board-game-cafe', 'escape-room'];
+if (argv.includes('--new')) NEW_SMALL.forEach((id, i) => wanted.push([id, [1, 2, 3, 4, 7, 8, 9, 11, 12, 13, 14][i], 1]));
 const placed: { id: string; x: number; y: number }[] = [];
 for (const [id, lx, ly] of wanted) {
   const x = d0.x + lx, y = d0.y + ly, t = w.getTile(x, y);
@@ -35,6 +41,17 @@ for (const [id, lx, ly] of wanted) {
   w.setTile(x, y, packTile(terrainOf(t), false, familyOf(kindId(id)), 1), subFor(kindId(id)));
   placed.push({ id, x, y });
   console.log(`placed ${id} at (${x}, ${y}) on ${w.parcelAt(x, y)?.name}, replacing ${was || 'nothing'}`);
+}
+
+// --new: bigger places as built structures in block interiors, facing the street to their north (rot 2), the lots cleared first
+if (argv.includes('--new')) {
+  for (const [id, ax, ay] of [['funfair', 6, 6], ['lido', 11, 11], ['aquarium', 13, 11], ['ice-rink', 6, 11]] as [string, number, number][]) {
+    const k = kindId(id), p0 = placedFromDoor(k, 0, 0, 2), p = placedFromDoor(k, d0.x + ax - p0.ax, d0.y + ay - p0.ay, 2);
+    for (let y = p.ay; y < p.ay + p.h; y++) for (let x = p.ax; x < p.ax + p.w; x++) w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, 0, 0));
+    w.placeStructure(p, { work: 0, priority: 0, built: true });
+    placed.push({ id, x: p.doorX, y: p.doorY });
+    console.log(`placed ${id} with its door at (${p.doorX}, ${p.doorY}), ${p.w}×${p.h}`);
+  }
 }
 
 const agesArg = (() => { const i = argv.indexOf('--ages'); return i >= 0 ? argv[i + 1].split('-').map(Number) : null; })();
@@ -84,7 +101,7 @@ console.log('\nPlaced venues now:');
 for (const p of placed) {
   const b = w.buildings.get(`${p.x},${p.y}`)!;
   const info = sim.describe(b);
-  const sp = leisureAt(b.zone, b.level, b.x, b.y);
+  const sp = leisureAt(b.id, b.level, b.x, b.y);
   console.log(`  ${p.id} at (${p.x}, ${p.y}): ${sp?.title}, level ${b.level}${w.sites.has(`${p.x},${p.y}`) ? ' (upgrade site open)' : ''}, staff ${b.occupants}/${info.capacity}, visits today ${info.venue?.visitsToday} yesterday ${info.venue?.visitsYesterday}, here now ${info.venue?.visitors}/${info.venue?.capacity}, next event ${info.venue?.nextEvent ? `${info.venue.nextEvent.weekday} ${info.venue.nextEvent.hour.toFixed(2)}` : 'none'}`);
 }
 

@@ -26,6 +26,8 @@ export interface GroupDef {
    * what it costs need not grow with the tier. Build work still grows with the footprint.
    */
   stages?: boolean;
+  /** What a collection's rungs are called in the picker and its tooltips ('landmarks' when unset): 'places' for the leisure collections. */
+  noun?: string;
   /** A ladder still in development: every rung may be a draft (validation otherwise calls that a mistake). Drop it when the first rung goes live. */
   draft?: boolean;
 }
@@ -44,6 +46,12 @@ export const GROUPS: GroupDef[] = [
   { id: 'theatre', label: 'Theatres', section: 'Leisure', color: '#7a3e8f', holds: 'seats' },
   { id: 'sports', label: 'Sport', section: 'Leisure', color: '#2f6fb5', holds: 'visitors' },
   { id: 'library', label: 'Libraries', section: 'Leisure', color: '#a8875a', holds: 'visitors' },
+  // free-time places (buildings/attractions.ts, docs/leisure.md): four collections of different places rather than size ladders,
+  // each place its own kind of outing with its own first-person scene
+  { id: 'outdoors', label: 'Play and green', section: 'Leisure', color: '#5aa04a', holds: 'visitors', collection: true, noun: 'places' },
+  { id: 'active', label: 'Active fun', section: 'Leisure', color: '#2f8fc0', holds: 'visitors', collection: true, noun: 'places' },
+  { id: 'daysout', label: 'Days out', section: 'Leisure', color: '#d9822b', holds: 'visitors', collection: true, noun: 'places' },
+  { id: 'hobbies', label: 'Arts and games', section: 'Leisure', color: '#9a4f9e', holds: 'visitors', collection: true, noun: 'places' },
   // education (docs/education.md section 3): nursery to research institute, sub-kinds of the library family (code 14)
   { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true },
   // broadcasters (docs/media.md): a local TV studio, a broadcast centre and a media centre with a news helipad (buildings/media.ts)

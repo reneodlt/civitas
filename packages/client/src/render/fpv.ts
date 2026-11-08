@@ -4,7 +4,8 @@ import {
 } from 'three';
 import { hash2, tvOnAt, TICKS_PER_HOUR, type CitizenInfo } from '@msimcity/shared';
 import type { CitizensView } from './citizens';
-import { Interior, placeOf, homeSeedOf, type Place } from './interiors';
+import { Interior, placeOf, homeSeedOf, type Place, type RoomKind } from './interiors';
+import './leisureRooms'; // registers the free-time places' and the park's scenes with interiors.ts (EXTRA_ROOMS)
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
@@ -360,7 +361,7 @@ export class Fpv {
    * Debug (msc.fpv.preview, the TV screenshots and timings): show a home's lounge (or a pub) full-window with nobody
    * selected, built for a made-up household whose set is on at the hour; `null` goes back to the game view.
    */
-  preview(room: 'lounge' | 'bar' | null, seed = 1, hour = sceneUniforms.uHour.value): string {
+  preview(room: RoomKind | null, seed = 1, hour = sceneUniforms.uHour.value, venue?: { x: number; y: number; kind: number }): string {
     this.shown?.dispose(); this.shown = null;
     if (!room) return '';
     let hh = seed;
@@ -371,7 +372,10 @@ export class Fpv {
     // a household whose set is on now
     for (let i = 0; i < 64 && room === 'lounge' && !tvOnAt(homeSeedOf(info(hh)), hour, true); i++) hh++;
     const ci = info(hh);
-    const place: Place = room === 'lounge' ? { room, seed: homeSeedOf(ci), key: 'preview' } : { room, seed: (seed * 31 + 7) | 0, key: 'preview' };
+    // any other room: a visit seeded like a real one, at a made-up place (or the place given, for the Ferris wheel over the real town)
+    const v = venue ?? { x: seed * 3, y: seed * 5, kind: 0 };
+    const place: Place = room === 'lounge' ? { room, seed: homeSeedOf(ci), key: 'preview' }
+      : { room, seed: (seed * 31 + 7) | 0, key: 'preview', venue: { ...v, seed: (v.x * 7919 + v.y * 104729 + v.kind * 31) | 0 } };
     this.shown = new Interior(place, ci, hour);
     this.layout(true);
     return this.shown.label;
@@ -467,7 +471,12 @@ export class Fpv {
   /** Advance the camera, fade and HUD; call once per frame after the citizens have moved. */
   update(now: number, dt: number, route: number[] | null) {
     this.avgMs += (dt * 1000 - this.avgMs) * 0.05;
-    if (this.shown) { this.shown.update(now, dt, sceneUniforms.uHour.value, this.sky); return; }
+    if (this.shown) {
+      this.shown.update(now, dt, sceneUniforms.uHour.value, this.sky);
+      const at = this.shown.worldAt;
+      if (at) { this.camera.position.set(at.x, at.y, at.z); this.camera.quaternion.copy(this.shown.camera.quaternion); this.camera.updateMatrixWorld(); this.fogFar = FOG_FAR * 3; }
+      return;
+    }
     if (this.mode === 'off') { this.swim = 0; return; }
     this.swimStep(dt);
     this.level = clamp(this.level + (this.want && !this.hold ? 1 : -1) * dt / (this.room || this.hold ? ROOM_FADE : FADE_SECONDS), 0, 1);
@@ -517,7 +526,7 @@ export class Fpv {
         if (this.level > 0 && this.ready) this.hold = true;
         else { this.room?.dispose(); this.room = new Interior(place, this.info!, hour); this.ready = true; }
       }
-      if (this.room) this.room.update(now, dt, hour, this.sky);
+      if (this.room) { this.room.update(now, dt, hour, this.sky); this.overTown(); }
       else if (eye) this.follow(eye, now, dt, route);
     } else if (eye) {
       this.lost = 0;
@@ -688,6 +697,26 @@ export class Fpv {
     this.lastHeading = this.heading;
   }
 
+  /**
+   * A room that rides above the real town (the Ferris wheel's gondola, render/leisureRooms.ts): the street camera goes to the
+   * eye's place in world tiles with the room camera's turn, so the city drawn first lines up with the gondola drawn over
+   * it, and the fog is pushed out so the town reaches the horizon.
+   */
+  private overTown() {
+    const r = this.room, at = r?.worldAt;
+    if (!r || !at) return;
+    this.camera.position.set(at.x, at.y, at.z);
+    this.camera.quaternion.copy(r.camera.quaternion);
+    this.camera.updateMatrixWorld();
+    this.fogFar = FOG_FAR * 3;
+  }
+  /** Draw the room, or for a ride above the town, the town and then the room over it. */
+  private drawRoom(renderer: WebGLRenderer, scene: Scene, hide: Object3D[]) {
+    const r = this.room!;
+    if (r.overWorld && r.worldAt) { this.street(renderer, scene, hide); r.renderOver(renderer); }
+    else r.render(renderer);
+  }
+
   /** the size of the first-person viewport in CSS pixels: the inset or the whole window */
   private viewW() { return this.mode === 'full' ? this.winW : this.rect.w; }
   private viewH() { return this.mode === 'full' ? this.winH : this.rect.h; }
@@ -799,7 +828,12 @@ export class Fpv {
     if (scene.background instanceof Color) this.sky.copy(scene.background);
     if (this.shown) {
       const a = this.winW / this.winH;
-      this.shown.setAspect(a); this.shown.render(renderer); this.fade.style.opacity = '0';
+      this.shown.setAspect(a);
+      if (this.shown.worldAt) {
+        if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); }
+        this.street(renderer, scene, hide); this.shown.renderOver(renderer);
+      } else this.shown.render(renderer);
+      this.fade.style.opacity = '0';
       return;
     }
     if (this.mode === 'off' || !this.ready) { renderer.render(scene, overhead); this.fade.style.opacity = '0'; return; }
@@ -812,7 +846,7 @@ export class Fpv {
       const a = this.winW / this.winH;
       if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); }
       this.fade.style.opacity = String(1 - this.level);
-      if (this.room) { this.room.setAspect(a); this.room.render(renderer); }
+      if (this.room) { this.room.setAspect(a); this.drawRoom(renderer, scene, hide); }
       else if (this.vo.on) {
         // the passenger's windows only (the cabin hides the rest)
         const o = this.vo, gy = this.winH - o.y - o.h;
@@ -846,7 +880,7 @@ export class Fpv {
       this.room.setAspect(w / h);
       if (!full) renderer.shadowMap.autoUpdate = false; // (the full window has had no overhead pass to refresh the sun's shadow map)
       renderer.setRenderTarget(this.rt);
-      this.room.render(renderer);
+      this.drawRoom(renderer, scene, hide);
       renderer.setRenderTarget(null);
       renderer.shadowMap.autoUpdate = true;
       this.rendered++;

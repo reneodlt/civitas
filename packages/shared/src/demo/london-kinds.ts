@@ -62,6 +62,25 @@ export const KIND_SPOTS: Spot[] = [
   ['westfield-parking', 'multi-storey', 51.5071, -0.2210, 'E'],
   ['brent-cross-park-ride', 'park-and-ride', 51.5760, -0.2240, 'N'],
   ['olympia-halt', 'rail-halt', 51.4980, -0.2100, 'N'],
+  // free-time places (docs/leisure.md): the allotments by Fulham Palace, Walthamstow Wetlands' fishing lakes, the London
+  // Wetland Centre at Barnes, Brockwell Lido, Queen's Club, the lanes off Brick Lane, Queens ice rink in Bayswater, a
+  // trampoline park in Wandsworth, the karts at Canning Town, Hyde Park's winter funfair, Mudchute Farm, the aquarium in
+  // the Horniman at Forest Hill, Greenwich's planetarium, the Science Museum and the Barbican's concert hall
+  ['bishops-park-allotments', 'allotments', 51.4710, -0.2160, 'E', 'N'],
+  ['walthamstow-wetlands', 'fishing-lake', 51.5810, -0.0580, 'W'],
+  ['wetland-centre', 'nature-reserve', 51.4770, -0.2370, 'N', 'S'],
+  ['brockwell-lido', 'lido', 51.4520, -0.1060, 'N'],
+  ['queens-club', 'tennis-club', 51.4875, -0.2140, 'E'],
+  ['brick-lane-bowling', 'bowling-alley', 51.5215, -0.0720, 'S'],
+  ['queens-ice', 'ice-rink', 51.5125, -0.1880, 'W'],
+  ['wandsworth-trampolines', 'trampoline-park', 51.4560, -0.1920, 'E', 'S'],
+  ['canning-town-karts', 'go-kart-track', 51.5150, 0.0100, 'N', 'N'],
+  ['hyde-park-funfair', 'funfair', 51.5070, -0.1600, 'S'],
+  ['mudchute-farm', 'city-farm', 51.4900, -0.0130, 'W', 'N'],
+  ['horniman-aquarium', 'aquarium', 51.4410, -0.0610, 'W'],
+  ['greenwich-planetarium', 'planetarium', 51.4770, -0.0020, 'N', 'S'],
+  ['science-museum', 'science-centre', 51.4978, -0.1745, 'S'],
+  ['barbican-hall', 'concert-hall', 51.5200, -0.0940, 'S'],
 ];
 
 /** The 1×1 kinds, each on a frontage lot as near the real place as one is found once the streets are laid. */
@@ -101,6 +120,20 @@ export const KIND_VENUES: Spot[] = [
   // transport: a car park in Camden and kerbside bays on Marylebone's streets
   ['camden-car-park', 'parking', 51.5395, -0.1430, 'W'],
   ['marylebone-bays', 'kerbside-bays', 51.5200, -0.1530, 'N'],
+  // free-time places: the Diana memorial playground, Stockwell's skate park, roller skating in Vauxhall, the Castle
+  // climbing centre, the Royal Observatory, the Whitechapel Gallery, a pottery in Hackney, the Rivoli Ballroom, Camden's
+  // arcade by the Lock, a board-game café in Haggerston and an escape room by King's Cross
+  ['diana-playground', 'playground', 51.5065, -0.1900, 'E'],
+  ['stockwell-skatepark', 'skate-park', 51.4720, -0.1210, 'N'],
+  ['vauxhall-roller-disco', 'roller-disco', 51.4855, -0.1235, 'W'],
+  ['castle-climbing', 'climbing-centre', 51.5660, -0.0920, 'E'],
+  ['royal-observatory', 'observatory', 51.4769, -0.0005, 'N'],
+  ['whitechapel-gallery', 'art-gallery', 51.5160, -0.0700, 'S'],
+  ['hackney-pottery', 'pottery-studio', 51.5500, -0.0480, 'W'],
+  ['rivoli-ballroom', 'dance-hall', 51.4590, -0.0350, 'E'],
+  ['camden-arcade', 'arcade', 51.5410, -0.1460, 'W'],
+  ['haggerston-games-cafe', 'board-game-cafe', 51.5390, -0.0760, 'N'],
+  ['kings-cross-escape', 'escape-room', 51.5310, -0.1180, 'S'],
 ];
 
 /** Names (World.setStopName at the door: the tooltips read right), the dead of a resting place, the hour a stop is shown at. */
@@ -143,6 +176,26 @@ const EXTRA: Record<string, Pick<DemoPlacement, 'name' | 'graves' | 'hour' | 'as
   'paddington-green-police': { name: 'Paddington Green Police Station' },
   'peckham-library': { name: 'Peckham Library' },
   'hyde-park-corner': { name: 'Hyde Park Corner' },
+  'bishops-park-allotments': { name: 'Bishop\'s Park allotments' },
+  'walthamstow-wetlands': { name: 'Walthamstow Wetlands' },
+  'wetland-centre': { name: 'London Wetland Centre' },
+  'brockwell-lido': { name: 'Brockwell Lido' },
+  'queens-club': { name: 'Queen\'s Club' },
+  'brick-lane-bowling': { name: 'Brick Lane bowling' },
+  'queens-ice': { name: 'Bayswater ice rink' },
+  'wandsworth-trampolines': { name: 'Wandsworth trampoline park' },
+  'canning-town-karts': { name: 'Canning Town karting' },
+  'hyde-park-funfair': { name: 'Hyde Park funfair' },
+  'mudchute-farm': { name: 'Mudchute Farm' },
+  'horniman-aquarium': { name: 'Horniman aquarium' },
+  'greenwich-planetarium': { name: 'Greenwich Planetarium' },
+  'science-museum': { name: 'Science Museum' },
+  'barbican-hall': { name: 'Barbican Hall' },
+  'diana-playground': { name: 'Diana Memorial Playground' },
+  'stockwell-skatepark': { name: 'Stockwell skate park' },
+  'royal-observatory': { name: 'Royal Observatory' },
+  'whitechapel-gallery': { name: 'Whitechapel Gallery' },
+  'rivoli-ballroom': { name: 'Rivoli Ballroom' },
 };
 
 /**

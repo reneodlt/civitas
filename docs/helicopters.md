@@ -10,7 +10,7 @@ A pad is part of a building design: the tierkit `helipad(x, y, z, r)` helper dra
 
 | Kind | Design | Where |
 | --- | --- | --- |
-| hospital (1×1) | white block with a roof cross and helipad | roof (the cross moved left to make room) |
+| hospital (1×1) | white ward block over a glazed outpatients wing (the 2026-11 redesign) | the ward block's roof, beside the cross |
 | community hospital | ward block across the back | ward block roof |
 | general hospital | ward tower over a podium; cruciform ward blocks | tower roof; the lawn |
 | teaching hospital | campus; domed main hall | ward tower; research tower |

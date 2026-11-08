@@ -196,7 +196,7 @@ export class UI {
         if (tools.querySelector(`button[data-ladder="${ladder.group.id}"]`)) continue;
         const g = ladder.group, key = ladder.tiers.find((k) => k.tool!.key)?.tool!.key ?? '';
         b.dataset.ladder = g.id;
-        b.innerHTML = `<span class="sw" style="background:${g.color}"></span><span>${esc(g.label)} <em class="tier"></em></span><span class="cost">${ladder.tiers.length} ${g.collection ? 'landmarks' : 'sizes'}</span><span class="key">${key}</span>`;
+        b.innerHTML = `<span class="sw" style="background:${g.color}"></span><span>${esc(g.label)} <em class="tier"></em></span><span class="cost">${ladder.tiers.length} ${g.collection ? (g.noun ?? 'landmarks') : 'sizes'}</span><span class="key">${key}</span>`;
         b.onclick = () => this.ladderClick(g.id);
         tools.appendChild(b);
         continue;
@@ -336,7 +336,7 @@ export class UI {
       if (!b) continue;
       const open = l.tiers.filter((k) => DEV_TOOLS || hasFeature(tech, k.tool!.id));
       b.classList.toggle('locked', open.length === 0);
-      b.title = open.length ? `${l.group.label}: ${open.length} of ${l.tiers.length} ${l.group.collection ? 'landmarks' : 'sizes'} unlocked` : `Needs ${techFor(l.tiers[0].tool!.id)?.name ?? ''} (press T for the tech tree)`;
+      b.title = open.length ? `${l.group.label}: ${open.length} of ${l.tiers.length} ${l.group.collection ? (l.group.noun ?? 'landmarks') : 'sizes'} unlocked` : `Needs ${techFor(l.tiers[0].tool!.id)?.name ?? ''} (press T for the tech tree)`;
     }
     this.picker.refresh();
     this.roadClassChanged();

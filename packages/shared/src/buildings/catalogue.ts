@@ -16,6 +16,7 @@ import { HARBOURS } from './harbour';
 import { CIVIC_TIERS } from './civic-tiers';
 import { PARKING_TIERS } from './parking';
 import { LEISURE_TIERS } from './leisure-tiers';
+import { ATTRACTIONS } from './attractions';
 import { RESIDENTIAL_MERGED } from './residential-merged';
 import { COMMERCIAL_MERGED } from './commercial-merged';
 import { OFFICE_MERGED } from './office-merged';
@@ -42,6 +43,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...HARBOURS,
   // size ladders (groups.ts): the smaller and bigger rungs around the kinds above
   ...CIVIC_TIERS, ...PARKING_TIERS, ...LEISURE_TIERS,
+  // free-time places (docs/leisure.md, attractions.ts): kind ids 217-229, 250-255, 118, 119, 129, 140 and 147-149, four collection groups
+  ...ATTRACTIONS,
   // the big screens corner (docs/adverts.md section 9): kind id 117, the cinema ladder's top rung, six big screens round its corner
   bigScreens,
   // merged lots (zones.ts): bigger zone kinds that growth assembles from neighbouring lots

@@ -50,6 +50,7 @@
     .thumb .tag { position: absolute; left: 4px; bottom: 3px; font-size: 10px; color: rgba(255,255,255,0.85); text-shadow: 0 1px 2px rgba(0,0,0,0.8); font-variant-numeric: tabular-nums; }
     .thumb .dr { position: absolute; right: 4px; top: 3px; font-size: 10px; color: #1b1405; background: var(--draft); border-radius: 3px; padding: 0 4px; }
     .thumb .by { position: absolute; left: 4px; top: 3px; font-size: 10px; color: #dfe9ff; background: rgba(60, 90, 160, 0.85); border-radius: 3px; padding: 0 4px; }
+    .thumb .mv { position: absolute; right: 4px; bottom: 3px; font-size: 10px; color: #0b2a1e; background: rgba(98, 210, 162, 0.85); border-radius: 3px; padding: 0 4px; }
     .pill.author { background: rgba(60, 90, 160, 0.35); }
     .authorsel { background: transparent; color: inherit; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px 6px; font: inherit; }
     .thumb[aria-current="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -64,6 +65,17 @@
     #stageTools { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     #stageTools .box { background: rgba(14,17,22,0.72); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; gap: 8px; align-items: center; }
     #hour { width: 120px; accent-color: var(--accent); }
+    #stageTools .seg { background: rgba(14,17,22,0.72); }
+    #stageTools .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #insideTools { position: absolute; top: 56px; right: 12px; left: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+    #insideTools[hidden] { display: none; }
+    #insideTools .box { pointer-events: auto; background: rgba(14,17,22,0.72); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; max-width: 100%; }
+    #insideTools .line { background: rgba(14,17,22,0.72); border-radius: 6px; padding: 4px 10px; color: var(--fg); }
+    #insideTools .line:empty { display: none; }
+    #insideTools .hint { color: rgba(230,233,239,0.6); font-size: 11px; text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+    #stage.inside #view { cursor: crosshair; }
+    #stage.inside #title .n { font-size: clamp(15px, 1.6vw, 20px); max-width: 40ch; }
+    #stage.inside #stageTools .box.turn { display: none; }
     #hourVal { font-variant-numeric: tabular-nums; width: 40px; color: var(--muted); }
 
     #spec { overflow-y: auto; padding: 14px 16px 24px; background: var(--panel); border-left: 1px solid var(--line); min-height: 0; }
@@ -81,6 +93,7 @@
     table.levels thead th.on { color: var(--accent); }
     .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line2); color: var(--muted); font-size: 11px; margin: 0 4px 4px 0; }
     .pill.draft { border-color: var(--draft); color: var(--draft); }
+    .pill.moving { border-color: rgba(98,210,162,0.55); color: var(--accent); }
     .tints { display: flex; flex-wrap: wrap; gap: 6px; }
     .tints button { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--line2); cursor: pointer; padding: 0; }
     .tints button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -113,6 +126,7 @@
       #grid { overflow: visible; }
       .thumbs { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
       #stageTools { left: 12px; justify-content: flex-start; }
+      #insideTools { top: 100px; align-items: flex-start; }
     }
     @media (prefers-reduced-motion: reduce) { #view { cursor: default; } }
   </style>
@@ -135,6 +149,7 @@
         <div class="row" id="famRow"><span class="lbl">Family</span></div>
         <div class="row" id="tierRow"><span class="lbl">Tech tier</span></div>
         <div class="row" id="tagRow"><span class="lbl">Tag</span></div>
+        <div class="row" id="motionRow"><span class="lbl">Motion</span></div>
         <div class="row"><span class="lbl"></span><label class="check"><input type="checkbox" id="drafts" checked /> Include drafts</label></div>
         <div class="row"><span class="lbl">Designer</span><select id="author" class="authorsel"></select></div>
       </div>
@@ -143,8 +158,14 @@
     <section id="stage" aria-label="Turntable preview">
       <canvas id="view"></canvas>
       <div id="stageTools">
+        <span class="seg" role="group" aria-label="View"><button id="outsideBtn" aria-pressed="true">Outside</button><button id="insideBtn" aria-pressed="false">Inside</button></span>
         <div class="box"><label for="hour" style="color:var(--muted)">Hour</label><input type="range" id="hour" min="0" max="24" step="0.25" value="11" /><span id="hourVal"></span></div>
-        <div class="box"><label class="check"><input type="checkbox" id="spin" checked /> Turn</label><label class="check"><input type="checkbox" id="site" /> Under construction</label><label class="check" title="Every size of this building's ladder side by side, smallest first"><input type="checkbox" id="lineup" /> Ladder line-up</label></div>
+        <div class="box turn"><label class="check"><input type="checkbox" id="spin" checked /> Turn</label><label class="check"><input type="checkbox" id="site" /> Under construction</label><label class="check" title="Every size of this building's ladder side by side, smallest first"><input type="checkbox" id="lineup" /> Ladder line-up</label></div>
+      </div>
+      <div id="insideTools" hidden>
+        <div class="box rooms"><span id="roomChips" class="row"></span><button id="visitBtn" class="chip" title="Another visitor, another seat, other people round them">Another visit</button></div>
+        <div class="line" id="insideLine"></div>
+        <div class="hint">Drag to look round · scroll to zoom</div>
       </div>
       <div id="title"><div class="k" id="titleKind"></div><div class="n" id="titleName"></div></div>
     </section>

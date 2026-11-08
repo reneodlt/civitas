@@ -2,13 +2,15 @@ import { MANIFEST, DESIGN_COUNT_TABLE, TOP_LEVEL_TABLE } from './buildings/compi
 import { LEVEL_SLOTS } from './buildings/codes';
 import type { Attributes } from './buildings/schema';
 import { hash2 } from './noise';
+import { LifeStage } from './protocol';
 
 /**
  * Leisure places as the simulation and the tooltips read them: one flat record per kind, level and live design,
  * built once from the compiled manifest (the leisure family's attributes in buildings/leisure.ts). Behaviour is
  * keyed by these numbers, never by kind id.
  */
-export type VenueType = 'park' | 'cinema' | 'theatre' | 'sports' | 'library';
+import { VENUE_TYPES, type VenueType } from './venueTypes';
+export { VENUE_TYPES, UNSTAFFED_VENUES, type VenueType } from './venueTypes';
 export interface LeisureSpec {
   kind: number; level: number; design: number;
   type: VenueType;
@@ -71,7 +73,7 @@ for (const k of MANIFEST) {
 /** The widest catchment of any leisure place, for spatial searches. */
 export const LEISURE_MAX_RADIUS = Math.max(0, ...SPECS.flatMap((l) => (l ?? []).map((sp) => sp.radius)));
 /** Index of each venue type, for hash-seeded tastes. */
-export const VENUE_TYPE_INDEX: Record<VenueType, number> = { park: 0, cinema: 1, theatre: 2, sports: 3, library: 4 };
+export const VENUE_TYPE_INDEX = Object.fromEntries(VENUE_TYPES.map((t, i) => [t, i])) as Record<VenueType, number>;
 /** Is this kind id a park or leisure venue? */
 export const isLeisure = (kind: number) => LEISURE_IDS[kind] === 1;
 
@@ -113,13 +115,75 @@ export function nextEvent(s: LeisureSpec, day: number, hour: number, x: number, 
   return null;
 }
 export const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-/** What an event is called, by venue type. */
-export const EVENT_NAMES: Record<VenueType, string> = { park: 'band in the park', cinema: 'premiere night', theatre: 'performance', sports: 'match night', library: 'quiz night' };
-/** Wording for activities and destinations, by venue type. */
-export const VENUE_WORDS: Record<VenueType, { at: string; going: string; event: string }> = {
-  park: { at: 'in the park', going: 'to the park', event: 'listening to the band in the park' },
-  cinema: { at: 'at the cinema', going: 'to the cinema', event: 'at a premiere' },
-  theatre: { at: 'at the theatre', going: 'to the theatre', event: 'watching a performance' },
-  sports: { at: 'at the sports hall', going: 'to the sports hall', event: 'watching a match' },
-  library: { at: 'at the library', going: 'to the library', event: 'at the quiz night' },
+/**
+ * How each type of outing is worded: `at` while there (the activity line, and the first-person view picks its scene by
+ * it), `going` on the way, `event` while an event is on, and `eventName` for the tooltip's next event. Children,
+ * families and retirees all go to these places, so every line is one a child could read.
+ */
+export const VENUE_TEXT: Record<VenueType, { at: string; going: string; event: string; eventName: string }> = {
+  park: { at: 'in the park', going: 'to the park', event: 'listening to the band in the park', eventName: 'band in the park' },
+  cinema: { at: 'at the cinema', going: 'to the cinema', event: 'at a premiere', eventName: 'premiere night' },
+  theatre: { at: 'at the theatre', going: 'to the theatre', event: 'watching a performance', eventName: 'performance' },
+  sports: { at: 'at the sports hall', going: 'to the sports hall', event: 'watching a match', eventName: 'match night' },
+  library: { at: 'at the library', going: 'to the library', event: 'at the quiz night', eventName: 'quiz night' },
+  playground: { at: 'at the playground', going: 'to the playground', event: 'at the playground', eventName: '' },
+  skatepark: { at: 'at the skate park', going: 'to the skate park', event: 'at the skate jam', eventName: 'skate jam' },
+  allotments: { at: 'on the allotment', going: 'to the allotment', event: 'at the harvest show', eventName: 'harvest show' },
+  fishing: { at: 'fishing at the lake', going: 'to the fishing lake', event: 'in the fishing match', eventName: 'fishing match' },
+  reserve: { at: 'birdwatching at the reserve', going: 'to the nature reserve', event: 'on the dawn chorus walk', eventName: 'dawn chorus walk' },
+  lido: { at: 'swimming at the lido', going: 'to the lido', event: 'at the swimming gala', eventName: 'swimming gala' },
+  tennis: { at: 'playing tennis', going: 'to the tennis club', event: 'at the club tournament', eventName: 'club tournament' },
+  bowling: { at: 'bowling', going: 'to the bowling alley', event: 'at league night', eventName: 'league night' },
+  icerink: { at: 'skating at the ice rink', going: 'to the ice rink', event: 'at the ice disco', eventName: 'ice disco' },
+  rollerdisco: { at: 'at the roller disco', going: 'to the roller disco', event: 'at the roller disco night', eventName: 'roller disco night' },
+  climbing: { at: 'climbing at the wall', going: 'to the climbing centre', event: 'in the bouldering competition', eventName: 'bouldering competition' },
+  trampoline: { at: 'at the trampoline park', going: 'to the trampoline park', event: 'at the family bounce', eventName: 'family bounce' },
+  karting: { at: 'racing go-karts', going: 'to the go-kart track', event: 'in the kart grand prix', eventName: 'kart grand prix' },
+  funfair: { at: 'at the funfair', going: 'to the funfair', event: 'watching the fireworks at the funfair', eventName: 'fireworks night' },
+  farm: { at: 'at the city farm', going: 'to the city farm', event: 'at the farm open day', eventName: 'open day' },
+  aquarium: { at: 'at the aquarium', going: 'to the aquarium', event: 'watching feeding time at the aquarium', eventName: 'feeding time' },
+  planetarium: { at: 'at the planetarium', going: 'to the planetarium', event: 'at the star show', eventName: 'star show' },
+  science: { at: 'at the science centre', going: 'to the science centre', event: 'at the science centre late', eventName: 'late opening' },
+  observatory: { at: 'at the observatory', going: 'to the observatory', event: 'stargazing at the observatory', eventName: 'stargazing night' },
+  gallery: { at: 'at the art gallery', going: 'to the art gallery', event: 'at an exhibition opening', eventName: 'exhibition opening' },
+  pottery: { at: 'at a pottery class', going: 'to the pottery studio', event: 'at the open studio', eventName: 'open studio' },
+  concert: { at: 'at a concert', going: 'to the concert hall', event: 'at the concert', eventName: 'concert' },
+  dancehall: { at: 'dancing at the dance hall', going: 'to the dance hall', event: 'at the tea dance', eventName: 'tea dance' },
+  arcade: { at: 'at the arcade', going: 'to the arcade', event: 'at high-score night', eventName: 'high-score night' },
+  boardgames: { at: 'playing board games', going: 'to the board-game café', event: 'at the games tournament', eventName: 'games tournament' },
+  escape: { at: 'in an escape room', going: 'to the escape room', event: 'in an escape room', eventName: '' },
 };
+/** Is this attribute value a venue type the game knows? (validation) */
+export const isVenueType = (v: unknown): v is VenueType => typeof v === 'string' && (VENUE_TYPES as readonly string[]).includes(v);
+/** What an event is called, by venue type. */
+export const EVENT_NAMES = Object.fromEntries(VENUE_TYPES.map((t) => [t, VENUE_TEXT[t].eventName])) as Record<VenueType, string>;
+/** Wording for activities and destinations, by venue type. */
+export const VENUE_WORDS = Object.fromEntries(VENUE_TYPES.map((t) => [t, { at: VENUE_TEXT[t].at, going: VENUE_TEXT[t].going, event: VENUE_TEXT[t].event }])) as Record<VenueType, { at: string; going: string; event: string }>;
+
+/**
+ * What someone does on a park visit (docs/leisure.md): a stroll and a sit on a bench, a picnic on the grass (midday to
+ * early evening), a kite on the open lawn (by day; children and their parents most) or feeding the ducks where the park
+ * has water (the pond, lakeside and botanical parks). Seeded per person and visit so a visit keeps one activity, and
+ * worded for the activity line; the first-person view picks its scene by the line. The band's afternoon is the park's event.
+ */
+export type ParkActivity = 'stroll' | 'picnic' | 'kite' | 'ducks';
+export const PARK_ACTIVITY_TEXT: Record<ParkActivity, string> = {
+  stroll: 'in the park', picnic: 'having a picnic in the park', kite: 'flying a kite in the park', ducks: 'feeding the ducks in the park',
+};
+/** Does this park have water to feed ducks on? (a pond or lake path layout, or a lake in the recipe) */
+export const parkHasWater = (s: LeisureSpec) => s.paths === 'pond' || s.title === 'lakeside park' || s.title === 'botanical garden';
+export function parkActivity(s: LeisureSpec, id: number, since: number, hour: number, stage: number): { id: ParkActivity; at: string } {
+  const u = hash2(id * 7 + 3, Math.floor(since / 97) + 11);
+  const day = hour >= 9 && hour < 19, lunch = hour >= 11.5 && hour < 18.5;
+  const child = stage === LifeStage.Child;
+  const opts: [ParkActivity, number][] = [
+    ['stroll', 1],
+    ['picnic', lunch ? 1.1 : 0],
+    ['kite', day ? (child ? 1.4 : 0.5) : 0],
+    ['ducks', parkHasWater(s) ? (child ? 1.5 : 0.9) : 0],
+  ];
+  const total = opts.reduce((a, [, w]) => a + w, 0);
+  let pickAt = u * total;
+  for (const [a, w] of opts) { if (pickAt < w) return { id: a, at: PARK_ACTIVITY_TEXT[a] }; pickAt -= w; }
+  return { id: 'stroll', at: PARK_ACTIVITY_TEXT.stroll };
+}

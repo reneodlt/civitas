@@ -7,7 +7,7 @@ import {
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
   withLevel, withProgress, progressOf, isRoad, tileKey, parseKey, mod,
   OCCUPATIONS, pickShift, hoursToTicks, hasFeature, levelFeature, nameFor, surnameFor, hash2, LifeStage, LIFE_STAGE_NAMES,
-  LEISURE_CODES, LEISURE_MAX_RADIUS, VENUE_TYPE_INDEX, VENUE_WORDS, EVENT_NAMES, WEEKDAY_NAMES, leisureAt, isLeisure, isOpenAt, eventOn, eventStartAt, nextEvent,
+  LEISURE_CODES, LEISURE_MAX_RADIUS, VENUE_TYPE_INDEX, VENUE_WORDS, parkActivity, EVENT_NAMES, WEEKDAY_NAMES, leisureAt, isLeisure, isOpenAt, eventOn, eventStartAt, nextEvent,
   type LeisureSpec, TRANSIT, stopModeOf, stopName, walkCost, BUS_DEPOT_KIND, TAXI, FLEET_JOB,
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, WORK_RATE_OF, PATROL_RATE_OF,
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
@@ -333,6 +333,12 @@ export class Simulation {
   }
 
   get dayFrac() { return (this.w.tick % DAY) / DAY; }
+  /** Guests at each leisure place right now, flat [x, y, count, ...] by door tile (ServerMsg 'venues'). */
+  venueGuests(): number[] {
+    const out: number[] = [];
+    for (const [key, g] of this.guests) { if (!g.size) continue; const [x, y] = parseKey(key); out.push(x, y, g.size); }
+    return out;
+  }
   private get hour() { return (this.w.tick % DAY) / TPH; }
 
   // ---- inspection -----------------------------------------------------------
@@ -524,6 +530,10 @@ export class Simulation {
     }
     const night = this.nightOf(c);
     if (night) info.night = night;
+    if (c.state === S.AtVenue && !c.errand && c.venue) {
+      const vb = this.w.buildings.get(c.venue);
+      if (vb && leisureAt(vb.id, vb.level, vb.x, vb.y)) info.venue = { x: vb.x, y: vb.y, kind: vb.id };
+    }
     if (c.leg) { info.tripDone = Math.max(0, c.leg.drive ? c.pi - 1 : c.pi); info.tripTotal = c.path.length / 2 - 1; }
     if (c.leg && this.legTrack.get(c)?.tripAt === c.tripStart) { const rr = this.reroutesOf(c).trip; if (rr > 0) info.reroutes = rr; }
     const role = this.mobile.roleOf(c);
@@ -755,7 +765,12 @@ export class Simulation {
         if (c.errand === ERRAND_FUNERAL) return 'at a funeral';
         if (c.errand) return 'seeing a doctor at the hospital';
         const sp = this.venueSpecOf(c), b = sp && c.venue ? this.w.buildings.get(c.venue) : undefined;
-        if (sp && b) return eventOn(sp, this.today) && Math.abs(this.hour - eventStartAt(sp, b.x, b.y) - 1) < 1.6 ? VENUE_WORDS[sp.type].event : VENUE_WORDS[sp.type].at;
+        if (sp && b) {
+          if (eventOn(sp, this.today) && Math.abs(this.hour - eventStartAt(sp, b.x, b.y) - 1) < 1.6) return VENUE_WORDS[sp.type].event;
+          // a park visit is a picnic, a kite or the ducks (where there is water), seeded per person and visit (docs/leisure.md)
+          if (sp.type === 'park') return parkActivity(sp, c.id, c.venueSince ?? 0, this.hour, c.stage).at;
+          return VENUE_WORDS[sp.type].at;
+        }
         return this.hour < 16 ? 'at a café' : 'out at a bar';
       }
     }

@@ -41,7 +41,7 @@ Never edit `compiled.ts` or `recipes.ts` by hand.
 
 - `npm run buildings:compile` validates the catalogue and rewrites `compiled.ts` and `recipes.ts` when their content changes. `--check` reports stale output without writing.
 - `npm run dev` and `npm run build` run the compile first.
-- The Vite plugin in `packages/client/vite.config.ts` also compiles when Vite starts and whenever a catalogue file is saved. Vite's hot reload then refreshes the city and `/viewer.html`. A broken catalogue shows in the Vite error overlay and leaves the last good output in place.
+- The Vite plugin in `packages/client/vite.config.ts` also compiles when Vite starts and whenever a catalogue file is saved. Vite's hot reload then refreshes the city and `/viewer.html`. A broken catalogue shows in the Vite error overlay and leaves the last good output in place. The viewer's **Inside** switch shows the first-person rooms a citizen sees in a kind (docs/leisure.md).
 - The server picks up the regenerated `compiled.ts` through `tsx watch`, so client and server always read the same tables.
 - `npm run buildings:check` is the snapshot test. It compares the tables with the values hard-coded before the catalogue existed, and every model's vertices and geometry bytes with the old `models.ts`. It also checks that the generated files are fresh, that validation rejects the mistakes it should, and that no part covers a window ("Facades").
 
@@ -194,6 +194,35 @@ FAIL window collision in 1:1 BAD: door box over a window (original, draft), a fa
 ```
 
 It fails for designs that use facades, for drafts and for any new design. The original catalogue predates facades, so its known collisions are listed without failing (`scripts/window-baseline.ts`); `npm run buildings:check -- --windows` prints them all. Fixing one means giving its wall a facade and placing its door by cell, then deleting its line from the baseline. The cottage, the bungalow with carport, the brick townhouse, the duplex and the brick walk-up are fixed this way; their re-snapshotted geometry is recorded in `FACADE_FIXED` in the check. Designs kept as a "before" for comparison carry an author ending in `(raw)` and are listed too.
+
+## Redesigns
+
+The thinnest designs of the original catalogue (three to six ops: a windowed box, a cap, a door box) were redrawn on 2026-11-06 and 2026-11-07 by `claude-fable-5-1`, in place. Each keeps its slot (same kind, level and index), so every tile that showed the old model shows the new one: a tile picks its design by hash among the live designs of its kind and level (`render/models.ts variant`), so replacing a design in its slot changes the model on exactly those tiles and reshuffles nothing. Drafts are never placed, which is why the Haiku, Sonnet, Opus and Fable landmark comparison sets stay out of the city.
+
+What was redrawn:
+
+| Where | Designs | Why these |
+| --- | --- | --- |
+| `office.ts` | all three levels except the helipad slab (`4:3:3`, which helicopters land on) | a pool of only four per level, so every office tile showed one of them; 3 to 5 ops each |
+| `civic.ts` | police station, fire station, hospital, builders' yard | one design each, on every placement; the hospital keeps a `helipad()` on its ward roof for `shared/src/helipads.ts` |
+| `residential.ts` | `1:1:2`, `1:1:3`, `1:2:2`, `1:2:3`, `1:3:0`, `1:3:2`, `1:3:3` | the originals with doors and bays drawn over windows (window-baseline.ts) and the two 5-op blocks |
+| `commercial.ts` | `2:1:0` to `2:1:3`, `2:2:0`, `2:2:2`, `2:2:3`, `2:3:0`, `2:3:3` | the 4-op boxes and the awning-over-window originals |
+| `industrial.ts` | `3:1:0` | the 4-op warehouse (keeps `goodsType: 'storage'` for the courier depots) |
+
+The house rules the redesigns follow, beyond the brief below: every windowed box is a facade with a named part, so doors, awnings, balconies, porches and cornices sit by cell; a wing or tower against a windowed wall covers whole cells (and remember a `margin` applies to the side walls too); an entrance canopy on a curtain-wall or shopfront lobby is a plain box on its own posts standing 0.04 clear of the wall, because the `porch` posts land in those full-width cells; roof plant, a lift room, a mast with a `beacon` box or a planted terrace gives each roof a silhouette; a forecourt (paving, a hedge, a path, `tree()` from tierkit, a parked `car()` or `van()`) grounds the lot. Near, a redesign runs 430 to 2,400 vertices (the catalogue median is 756); the far tier (`render/models.ts farOps`) drops the cell split and the small parts, so past about 120 tiles they cost 72 to 360 vertices, as the old models did near. One draw call either way.
+
+The snapshot check records them in `REDESIGNED` in `scripts/check-buildings.ts` (height, vertices, geometry hash: unlike the facade fixes, the height may change), and their lines left `window-baseline.ts`. Still thin: industrial `3:1:1` to `3:1:3` and the level 2 and 3 industrial originals, office `4:3:3`, and the two-to-four-op Haiku extras (`designs/haiku-*.ts`: the coach house, the A-frame cabin, the quonset hut).
+
+## Moving parts
+
+The kit draws every building still. What moves on or at a building is drawn over it by the client's instanced passes,
+each fed the same placements render/buildings.ts gives the BatchedMesh and each behind the one motion switch
+(`render/motionGate.ts`): the leisure places' rigs (docs/leisure.md section 9), the fires (docs/incidents.md), the
+Ferris wheel and the wind turbines, and the ambient pass (`render/ambient.ts`) that reads the compiled ops themselves:
+smoke from any `chimneyStack` (its red cap) by day, from a home's chimney (a small box in the `chimney` colour) on dark
+evenings and mornings, from the camp's fire (window class `fire`) at night; and a working jib, trolley and hook on
+every `crane` helper (which now builds only the mast). A design gets these for free by using the helpers and colours;
+nothing needs marking up. The viewer draws them too.
 
 ## Brief for AI designers
 
@@ -386,6 +415,7 @@ A building family can come in sizes. Kinds with the same `group` form a **ladder
 | Theatres | studio theatre (1×1) · theatre (the original) · opera house (3×3) |
 | Sport | sports hall (the original) · leisure centre with a pool (2×2) · arena (3×3) · stadium with floodlights (4×4) |
 | Libraries | library (the original) · central library (2×2) · museum (3×2) |
+| Play and green, Active fun, Days out, Arts and games | collections of different free-time places rather than sizes (`collection: true, noun: 'places'`): from an adventure playground to a funfair whose Ferris wheel turns, 26 in all (`attractions.ts`, docs/leisure.md) |
 | Media | local TV studio (1×1) · broadcast centre (2×2) · media centre with a news helipad and a dish array (3×2): placed sub-kinds of the office family, kind ids 130-132 (`media.ts`, docs/media.md) |
 | Cemeteries | churchyard (2×2) · municipal cemetery (3×3) · garden cemetery (4×4) · crematorium (3×2): park-family leisure places of low appeal (quiet green space), each design with its plot layout; a `stages` ladder, as the crematorium is smaller and cheaper than the garden cemetery (`remembrance.ts`, docs/remembrance.md). The funeral director (1×1) has its own tool |
 | Power grid | substation (1×1) · grid supply point (2×2) · power depot (2×1): stages of the power network, kind ids 160-162 (`utilities.ts`, docs/utilities.md) |

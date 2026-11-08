@@ -149,10 +149,13 @@ function shoot(list: Entry[], hour: number) {
         const box = new Box3().expandByObject(m);
         if (trees) box.expandByObject(trees);
         if (parts) box.expandByObject(parts.object);
-        const center = box.getCenter(new Vector3()), dir = viewDir(-0.6, 0.45);
-        const dist = fitDist(box, center, dir, thumbCam.fov);
-        thumbCam.position.copy(center).addScaledVector(dir, dist);
-        target.copy(center);
+        // the caption covers the foot of the square: fit the model with a band of empty space below it, so it sits high
+        const dir = viewDir(-0.6, 0.45);
+        const fitBox = box.clone();
+        fitBox.min.y -= (box.max.y - box.min.y) * 0.45;
+        target.copy(fitBox.getCenter(new Vector3()));
+        const dist = fitDist(fitBox, target, dir, thumbCam.fov);
+        thumbCam.position.copy(target).addScaledVector(dir, dist);
         thumbCam.lookAt(target);
         thumbLight.fixedHour = hour;
         thumbLight.update(hour, target, dist);

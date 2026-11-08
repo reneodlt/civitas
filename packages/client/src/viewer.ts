@@ -9,13 +9,21 @@ import {
   WebGLRenderer, Scene, PerspectiveCamera, Mesh, Group, PlaneGeometry, MeshLambertMaterial, Color, Vector3, GridHelper,
   ACESFilmicToneMapping, PCFSoftShadowMap, type MeshLambertMaterial as LambertT,
 } from 'three';
-import { MANIFEST, TECH_BY_ID, TRACK_NAMES, CATALOGUE_HASH, LADDERS, ladderOf, tierSummary, footprintLabel, techFor, type KindManifest, type LevelManifest, type DesignManifest, type Attributes } from '@msimcity/shared';
+import { MANIFEST, TECH_BY_ID, TRACK_NAMES, CATALOGUE_HASH, LADDERS, FUNFAIR_KIND, ladderOf, tierSummary, footprintLabel, techFor, type KindManifest, type LevelManifest, type DesignManifest, type Attributes } from '@msimcity/shared';
 import { buildModels, allDesigns, model, type Design } from './render/models';
 import { buildingMaterial } from './render/materials';
 import { Lighting } from './render/lighting';
 import { parkScatterGroup } from './render/parks';
 import { landmarkPreview } from './render/landmarks';
+import { LeisureAnims } from './render/leisureAnims';
+import { WheelsView } from './render/wheels';
+import { AmbientView } from './render/ambient';
+import { RIGS } from './render/leisureRigs';
+import { Matrix4 } from 'three';
 import { nightUniform } from './render/materials';
+import { Interior, EXTRA_ROOMS, type Place, type RoomKind } from './render/interiors';
+import './render/leisureRooms'; // registers the free-time places' and the park's scenes
+import { Zone, PARK_ACTIVITY_TEXT, type CitizenInfo } from '@msimcity/shared';
 
 // ---------------------------------------------------------------- catalogue entries
 
@@ -28,10 +36,12 @@ const FAMILY_LABEL: Record<string, string> = { residential: 'Residential', comme
 const families = [...new Set(MANIFEST.map((k) => k.family))];
 /** metadata tags on kinds ('london': the landmarks), for the Tag filter (?tag=london) */
 const TAGS = [...new Set(MANIFEST.flatMap((k) => k.tags ?? []))].sort();
+/** the city draws moving parts over this design: a rig for its kind (and design, where the rig names one), or the funfair's wheel (render/leisureRigs.ts, wheels.ts) */
+const moves = (e: Entry) => e.kind.kindId === FUNFAIR_KIND || RIGS.some((r) => r.kind === e.kind.kindId && (r.design === undefined || r.design === e.design.index));
 
 // ---------------------------------------------------------------- state (kept in the hash so HMR reloads land in the same place)
 
-const state = { key: entries[0].design.key, family: 'all', tier: -1, tag: 'all', drafts: true, author: 'all', hour: 11, spin: true, site: false, tint: -1, view: 'kinds' as 'kinds' | 'ladders', lineup: false };
+const state = { key: entries[0].design.key, family: 'all', tier: -1, tag: 'all', motion: false, drafts: true, author: 'all', hour: 11, spin: true, site: false, tint: -1, view: 'kinds' as 'kinds' | 'ladders', lineup: false, inside: false, room: '', visit: 1 };
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   if (p.get('d') && entries.some((e) => e.design.key === p.get('d'))) state.key = p.get('d')!;
@@ -42,18 +52,24 @@ function readHash() {
   const q = new URLSearchParams(location.search); // ?author=… also works, for shareable links
   if (p.get('author') || q.get('author')) state.author = (p.get('author') || q.get('author'))!;
   if (p.get('tag') || q.get('tag')) state.tag = (p.get('tag') || q.get('tag'))!; // ?tag=london: the London landmarks
+  if (p.get('m') === '1') state.motion = true; // only designs with moving parts
   if (p.get('site') === '1') state.site = true;
   if (p.get('v') === 'ladders') state.view = 'ladders';
   if (p.get('lu') === '1') state.lineup = true;
+  if (p.get('in') === '1') state.inside = true;
+  if (p.get('room')) state.room = p.get('room')!;
+  if (p.get('visit')) state.visit = Math.max(1, Number(p.get('visit')) || 1);
 }
 function writeHash() {
   const p = new URLSearchParams({ d: state.key, f: state.family, t: String(state.tier), h: String(state.hour) });
   if (!state.drafts) p.set('drafts', '0');
   if (state.author !== 'all') p.set('author', state.author);
   if (state.tag !== 'all') p.set('tag', state.tag);
+  if (state.motion) p.set('m', '1');
   if (state.site) p.set('site', '1');
   if (state.view === 'ladders') p.set('v', 'ladders');
   if (state.lineup) p.set('lu', '1');
+  if (state.inside) { p.set('in', '1'); if (state.room) p.set('room', state.room); if (state.visit > 1) p.set('visit', String(state.visit)); }
   history.replaceState(null, '', '#' + p.toString());
 }
 readHash();
@@ -63,7 +79,7 @@ const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;',
 const money = (n: number) => '$' + (Math.round(n * 100) / 100).toLocaleString();
 const hh = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const authorOf = (e: { design: { author?: string } }) => e.design.author ?? 'original';
-const visible = () => entries.filter((e) => (state.family === 'all' || e.kind.family === state.family) && (state.tier < 0 || e.tier === state.tier) && (state.drafts || !e.design.draft) && (state.author === 'all' || authorOf(e) === state.author) && (state.tag === 'all' || !!e.kind.tags?.includes(state.tag)));
+const visible = () => entries.filter((e) => (state.family === 'all' || e.kind.family === state.family) && (state.tier < 0 || e.tier === state.tier) && (state.drafts || !e.design.draft) && (state.author === 'all' || authorOf(e) === state.author) && (state.tag === 'all' || !!e.kind.tags?.includes(state.tag)) && (!state.motion || moves(e)));
 const current = () => entries.find((e) => e.design.key === state.key) ?? entries[0];
 
 // ---------------------------------------------------------------- turntable
@@ -117,9 +133,13 @@ function lineupEntries(e: Entry): Entry[] {
 }
 /** the current landmark's moving parts, turned by the game clock the viewer's hour stands for */
 let moving: ReturnType<typeof landmarkPreview> = null;
+/** the leisure places' moving parts and the funfair's wheel (render/leisureAnims.ts, wheels.ts), as the city draws them over the model */
+const anims = new LeisureAnims(), wheels = new WheelsView(), ambient = new AmbientView();
+scene.add(anims.group, wheels.group, ambient.group);
 function showCurrent() {
   turntable.clear();
   moving = null;
+  anims.clear('viewer'); wheels.clear('viewer'); ambient.clear('viewer');
   const e = current();
   const d = e.built;
   const tint = state.tint >= 0 && e.kind.tints ? e.kind.tints[state.tint] : 0xffffff;
@@ -158,6 +178,9 @@ function showCurrent() {
     if (trees) turntable.add(trees);
     moving = landmarkPreview(e.kind.kindId); // landmarks: the Eye's wheel, Big Ben's dials (render/landmarks.ts)
     if (moving) turntable.add(moving.object);
+    // the model stands at the origin as a built place whose door is tile (0, 0): the pass takes an open place as half full
+    const placed = [{ key: e.built.key, matrix: new Matrix4(), sign: { kind: e.kind.kindId, x: 0, y: 0, r: 0 }, ad: [0, 0, 0] as [number, number, number] }];
+    anims.setChunk('viewer', placed); wheels.setChunk('viewer', placed); ambient.setChunk('viewer', placed);
   }
   // the grey lot under the model covers its footprint
   bench.lot.visible = true;
@@ -165,16 +188,90 @@ function showCurrent() {
   frame(state.site ? Math.max(1, d.height * 0.5) : d.height, spanOf(e.kind));
 }
 
+// ---------------------------------------------------------------- inside: the first-person rooms (render/interiors.ts)
+
+const ROOM_NAME: Partial<Record<RoomKind, string>> = {
+  lounge: 'lounge', kitchen: 'kitchen', bed: 'bedroom', shop: 'shop floor', cafe: 'café', office: 'office', police: 'police office',
+  factory: 'factory floor', yard: 'yard', ward: 'ward', doctor: "doctor's room", fire: 'fire station', hub: 'terminal',
+  stroll: 'stroll', picnic: 'picnic', kite: 'kite flying', ducks: 'feeding the ducks', band: 'band concert', sports: 'sports hall',
+};
+const roomName = (r: RoomKind) => ROOM_NAME[r] ?? String(r).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/-/g, ' ');
+/** The rooms a citizen can be seen in at this kind, in the order the chips show them (the same rooms placeOf picks in the game). */
+function roomsOf(kind: KindManifest): RoomKind[] {
+  const vt = (kind.attrs as Attributes | undefined)?.venueType;
+  if (kind.family === 'leisure') {
+    if (vt === 'park') return [...(Object.keys(PARK_ACTIVITY_TEXT) as RoomKind[]), 'band'];
+    return vt && (EXTRA_ROOMS[vt as RoomKind] || ['cinema', 'theatre', 'sports', 'library'].includes(String(vt))) ? [vt as RoomKind] : [];
+  }
+  const byCode: Record<number, RoomKind[]> = {
+    [Zone.Residential]: ['lounge', 'kitchen', 'bed'], [Zone.Commercial]: ['shop', 'cafe'], [Zone.Industrial]: ['factory'], [Zone.Office]: ['office'],
+    [Zone.Police]: ['police'], [Zone.Fire]: ['fire'], [Zone.Hospital]: ['ward', 'doctor'], [Zone.Yard]: ['yard'], [Zone.Hub]: ['hub'],
+  };
+  return byCode[kind.code] ?? [];
+}
+const WORK: ReadonlySet<RoomKind> = new Set<RoomKind>(['shop', 'office', 'police', 'factory', 'yard', 'ward', 'fire', 'hub']);
+const HOME: ReadonlySet<RoomKind> = new Set<RoomKind>(['lounge', 'kitchen', 'bed']);
+let interior: Interior | null = null, interiorFor = '';
+/** look offsets the visitor adds by dragging, on top of the room's own idle glances */
+let lookYaw = 0, lookPitch = 0, lookFov = 70;
+/** Build the room the chips and the hour say, for a made-up visitor (like render/fpv.ts's preview), at this kind's door. */
+function buildInterior() {
+  const e = current(), rooms = roomsOf(e.kind);
+  const room = rooms.includes(state.room as RoomKind) ? (state.room as RoomKind) : rooms[0];
+  const key = `${e.design.key}|${room}|${state.visit}|${Math.round(state.hour * 4)}`;
+  if (key === interiorFor && interior) return;
+  interior?.dispose(); interior = null; interiorFor = key;
+  if (!room) return;
+  const seed = state.visit, x = 11 + seed * 3, y = 7 + seed * 5, kindId = e.kind.kindId;
+  const work = WORK.has(room), home = HOME.has(room);
+  const act = home ? 'at home' : work ? 'on shift' : '';
+  const info = {
+    id: 9_900_000 + seed * 17 + kindId, name: 'Visitor', role: 'citizen', mode: 'none', activity: act, status: 'idle', waitTicks: 0,
+    home: { x: x + 2, y: y + 1, label: 'home', parcel: '' }, employer: work ? { x, y, kind: kindId } : undefined,
+    venue: { x, y, kind: kindId },
+    life: { age: 34, stage: 'adult', household: { id: 4000 + seed, members: [] } },
+  } as unknown as CitizenInfo;
+  const pseed = home ? ((x + 2) * 92821 + (y + 1) * 68917 + (4000 + seed) * 31) | 0 : work ? (x * 7919 + y * 104729) | 0 : (info.id * 31 + 7) | 0;
+  const place: Place = { room, seed: pseed, key: `${home ? 'home' : work ? 'work' : 'venue'}:${pseed}:${room}`, venue: home || work ? undefined : { x, y, kind: kindId, seed: (x * 7919 + y * 104729 + kindId * 31) | 0 } };
+  try { interior = new Interior(place, info, state.hour); } catch (err) { console.error('[viewer] interior', room, err); interior = null; }
+}
+function renderInsideTools() {
+  const e = current(), rooms = roomsOf(e.kind);
+  const box = $('insideTools');
+  $('outsideBtn').setAttribute('aria-pressed', String(!state.inside));
+  $('insideBtn').setAttribute('aria-pressed', String(state.inside));
+  $<HTMLButtonElement>('insideBtn').disabled = !rooms.length;
+  $('insideBtn').title = rooms.length ? 'First-person view from inside, as a citizen sees it' : 'No inside view for this kind';
+  const on = state.inside && rooms.length > 0;
+  box.hidden = !on;
+  $('stage').classList.toggle('inside', on);
+  if (!on) return;
+  const cur = rooms.includes(state.room as RoomKind) ? state.room : rooms[0];
+  $('roomChips').innerHTML = rooms.map((r) => `<button class="chip" data-room="${esc(r)}" aria-pressed="${r === cur}">${esc(roomName(r))}</button>`).join('');
+  $('roomChips').querySelectorAll<HTMLButtonElement>('[data-room]').forEach((b) => (b.onclick = () => { state.room = b.dataset.room!; writeHash(); renderInsideTools(); }));
+}
+function setInside(on: boolean) {
+  state.inside = on && roomsOf(current().kind).length > 0;
+  lookYaw = 0; lookPitch = 0;
+  if (!state.inside) { interior?.dispose(); interior = null; interiorFor = ''; }
+  writeHash(); renderInsideTools();
+}
+
 let dragging = false, lastX = 0, lastY = 0, idleSince = 0;
 canvas.addEventListener('pointerdown', (ev) => { dragging = true; lastX = ev.clientX; lastY = ev.clientY; canvas.setPointerCapture(ev.pointerId); });
 canvas.addEventListener('pointermove', (ev) => {
   if (!dragging) return;
+  if (interior) { // inside: turn the head
+    lookYaw += (ev.clientX - lastX) * 0.004;
+    lookPitch = Math.max(-1.1, Math.min(1.1, lookPitch + (ev.clientY - lastY) * 0.004));
+    lastX = ev.clientX; lastY = ev.clientY; return;
+  }
   yaw -= (ev.clientX - lastX) * 0.01;
   pitch = Math.max(0.08, Math.min(1.3, pitch + (ev.clientY - lastY) * 0.006));
   lastX = ev.clientX; lastY = ev.clientY; idleSince = performance.now();
 });
 canvas.addEventListener('pointerup', () => { dragging = false; });
-canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); frameDist = Math.max(1.2, Math.min(14, frameDist * (ev.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
+canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); if (interior) { lookFov = Math.max(30, Math.min(95, lookFov * (ev.deltaY > 0 ? 1.06 : 0.94))); return; } frameDist = Math.max(1.2, Math.min(14, frameDist * (ev.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 if (reduceMotion) state.spin = false;
@@ -189,12 +286,28 @@ function tick(now: number) {
     camera.aspect = w / Math.max(1, h);
     camera.updateProjectionMatrix();
   }
+  if (state.inside) {
+    applyHour(lighting, target, frameDist); // the hour's light: the rooms read the night uniform and the sky colour
+    buildInterior();
+    if (interior) {
+      interior.setAspect(w / Math.max(1, h));
+      interior.update(now, dt, state.hour, lighting.sky);
+      const c = interior.camera;
+      c.rotation.y += lookYaw; c.rotation.x = Math.max(-1.45, Math.min(1.45, c.rotation.x - lookPitch));
+      if (Math.abs(c.fov - lookFov) > 0.01) { c.fov = lookFov; c.updateProjectionMatrix(); }
+      if (interior.label !== $('insideLine').textContent) $('insideLine').textContent = interior.label;
+      interior.render(renderer);
+      requestAnimationFrame(tick);
+      return;
+    }
+  }
   target.set(0, frameY, 0);
   camera.position.set(Math.sin(yaw) * Math.cos(pitch) * frameDist, frameY + Math.sin(pitch) * frameDist, Math.cos(yaw) * Math.cos(pitch) * frameDist);
   camera.lookAt(target);
   applyHour(lighting, target, frameDist);
   scene.background = lighting.sky;
   moving?.update(state.hour + now / 20000, nightUniform.value); // a game hour is 20 s, as in the city
+  anims.frame([camera]); wheels.frame([camera]); ambient.frame([camera]);
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -270,13 +383,19 @@ function renderFilters() {
   const tag = $('tagRow');
   tag.hidden = !TAGS.length;
   tag.replaceChildren(tag.firstElementChild!, chip('Any', state.tag === 'all', () => setTag('all')), ...TAGS.map((t) => chip(cap(t), state.tag === t, () => setTag(t))));
+  const motion = $('motionRow');
+  motion.replaceChildren(motion.firstElementChild!, chip('Any', !state.motion, () => setMotion(false)), chip('Moving parts', state.motion, () => setMotion(true)));
+  motion.lastElementChild!.setAttribute('title', `Only the ${entries.filter(moves).length} designs the city draws moving parts over`);
   $<HTMLInputElement>('drafts').checked = state.drafts;
 }
-function setTag(t: string) {
-  state.tag = t;
+function setTag(t: string) { state.tag = t; refilter(); }
+function setMotion(on: boolean) { state.motion = on; refilter(); }
+/** the tag or motion filter changed: land on a design that still shows */
+function refilter() {
   const list = visible();
   if (list.length && !list.some((e) => e.design.key === state.key)) state.key = list[0].design.key;
-  writeHash(); renderFilters(); renderGrid(); showCurrent(); renderSpec();
+  if (!roomsOf(current().kind).length) state.inside = false;
+  writeHash(); renderFilters(); renderGrid(); showCurrent(); renderSpec(); renderInsideTools();
 }
 function renderGrid() {
   const list = visible();
@@ -302,9 +421,9 @@ function renderGrid() {
     // merged lots (shared/src/zones.ts) show their footprint like ladder rungs do
     const fp = lad || (kind.flags.growable && kind.footprint) ? ` <span>${footprintLabel(kind)}</span>` : '';
     return `${head}<h3>${rung}<b>${esc(cap(kind.name))}</b>${fp}${lv}</h3><div class="thumbs">${g.map((e) => `
-      <button class="thumb" data-key="${e.design.key}" aria-current="${e.design.key === state.key}" title="${esc(e.design.name)}" aria-label="${esc(cap(e.kind.name))} level ${e.level.level}: ${esc(e.design.name)}${e.design.draft ? ' (draft)' : ''}">
+      <button class="thumb" data-key="${e.design.key}" aria-current="${e.design.key === state.key}" title="${esc(e.design.name)}" aria-label="${esc(cap(e.kind.name))} level ${e.level.level}: ${esc(e.design.name)}${e.design.draft ? ' (draft)' : ''}${moves(e) ? ', moving parts' : ''}">
         <img data-key="${e.design.key}" alt="" src="${thumbs.get(e.design.key) ?? ''}" />
-        <span class="tag">${e.design.key}</span>${e.design.draft ? '<span class="dr">draft</span>' : ''}${e.design.author ? `<span class="by">${esc(e.design.author.replace(/^claude-/, ''))}</span>` : ''}
+        <span class="tag">${e.design.key}</span>${e.design.draft ? '<span class="dr">draft</span>' : ''}${e.design.author ? `<span class="by">${esc(e.design.author.replace(/^claude-/, ''))}</span>` : ''}${moves(e) ? '<span class="mv">moving</span>' : ''}
       </button>`).join('')}</div>`;
   }).join('');
   grid.querySelectorAll<HTMLButtonElement>('button.thumb').forEach((b) => (b.onclick = () => select(b.dataset.key!)));
@@ -333,7 +452,7 @@ function ladderHtml(kind: KindManifest): string {
     const key = entries.find((x) => x.kind.kindId === k.kindId && !x.design.draft)?.design.key ?? '';
     return `<tr data-key="${esc(key)}" class="${k.kindId === kind.kindId ? 'on' : ''}"><td class="${k.kindId === kind.kindId ? 'on' : ''}">${s.tier}</td><td class="${k.kindId === kind.kindId ? 'on' : ''}">${esc(k.tool?.label ?? k.name)}</td><td>${s.footprint}</td><td>${s.holds}</td><td>${does}</td><td>${money(s.cost)}</td><td>${money(s.upkeep)}</td><td title="${esc(t?.name ?? 'from the start')}">${t ? `${esc(TRACK_NAMES[t.track].slice(0, 3))} ${t.tier}` : '–'}</td></tr>`;
   };
-  return `<h4>${esc(lad.group.label)} ${lad.group.collection ? `landmarks · ${kind.tier} of ${lad.tiers.length}` : `ladder · size ${kind.tier} of ${lad.tiers.length}`}</h4>
+  return `<h4>${esc(lad.group.label)} ${lad.group.collection ? `${lad.group.noun ?? 'landmarks'} · ${kind.tier} of ${lad.tiers.length}` : `ladder · size ${kind.tier} of ${lad.tiers.length}`}</h4>
     ${kind.blurb ? `<p class="blurb">${esc(kind.blurb)}</p>` : ''}${kind.howTo ? `<p class="howto">${esc(kind.howTo)}</p>` : ''}
     <table class="levels ladder"><thead><tr><th>#</th><th>Size</th><th>Tiles</th><th>${esc(lad.group.holds)}</th><th>Covers</th><th>Cost</th><th>/day</th><th>Tech</th></tr></thead><tbody>${lad.tiers.map(row).join('')}</tbody></table>
     <p class="note">Click a row to view that size; tick <b>Ladder line-up</b> to see them side by side.</p>`;
@@ -377,7 +496,7 @@ function renderSpec() {
   $('spec').innerHTML = `
     <h2>${esc(cap(design.name))}</h2>
     <div class="sub">${esc(cap(kind.name))}${kind.name !== kind.family ? `, ${esc((FAMILY_LABEL[kind.family] ?? kind.family).toLowerCase())} family` : ''}. Kind id ${kind.kindId}${kind.kindId !== kind.code ? ` (sub-kind of family code ${kind.code})` : ''}, level ${level.level}, design ${design.index + 1} of ${level.designs.length}.${merged ? ` Merged lots, ${footprintLabel(kind)}: grown when neighbouring ${esc(kind.family)} lots of one owner merge, never placed.` : ''}</div>
-    <div>${design.draft ? '<span class="pill draft">Draft: viewer only, not placed in the city</span>' : ''}<span class="pill">${esc(design.key)}</span><span class="pill">${design.height} tiles tall</span><span class="pill">${design.ops} parts · ${e.built.geometry.attributes.position.count} vertices</span><span class="pill">${esc(kind.windows)} windows</span><span class="pill author">designed by ${esc(design.author ?? 'original catalogue')}</span>${kind.landmark ? '<span class="pill">landmark</span>' : ''}${(kind.tags ?? []).map((t) => `<span class="pill">tag: ${esc(t)}</span>`).join('')}</div>
+    <div>${design.draft ? '<span class="pill draft">Draft: viewer only, not placed in the city</span>' : ''}<span class="pill">${esc(design.key)}</span><span class="pill">${design.height} tiles tall</span><span class="pill">${design.ops} parts · ${e.built.geometry.attributes.position.count} vertices</span><span class="pill">${esc(kind.windows)} windows</span><span class="pill author">designed by ${esc(design.author ?? 'original catalogue')}</span>${moves(e) ? '<span class="pill moving" title="The city draws parts moving over this design (render/leisureRigs.ts, wheels.ts); the turntable shows them">moving parts</span>' : ''}${kind.landmark ? '<span class="pill">landmark</span>' : ''}${(kind.tags ?? []).map((t) => `<span class="pill">tag: ${esc(t)}</span>`).join('')}</div>
     ${ladderHtml(kind)}
     <h4>Per level</h4>${table}
     <h4>Tech needed</h4>${techText(level.tech)}
@@ -395,9 +514,11 @@ function renderSpec() {
 function select(key: string) {
   if (!entries.some((e) => e.design.key === key)) return;
   if (current().kind.kindId !== entries.find((e) => e.design.key === key)!.kind.kindId) state.tint = -1;
+  const sameKind = current().kind.kindId === entries.find((e) => e.design.key === key)!.kind.kindId;
   state.key = key;
+  if (!sameKind) { state.room = ''; lookYaw = 0; lookPitch = 0; if (!roomsOf(current().kind).length) setInside(false); }
   writeHash();
-  showCurrent(); renderSpec();
+  showCurrent(); renderSpec(); renderInsideTools();
   document.querySelectorAll('button.thumb').forEach((b) => b.setAttribute('aria-current', String((b as HTMLElement).dataset.key === key)));
 }
 function setFilter(family: string, tier: number) {
@@ -422,6 +543,9 @@ function setHour(h: number, reshoot = true) {
   writeHash();
   if (reshoot && changedSide) shootThumbs();
 }
+$('outsideBtn').onclick = () => setInside(false);
+$('insideBtn').onclick = () => setInside(true);
+$('visitBtn').onclick = () => { state.visit++; lookYaw = 0; lookPitch = 0; writeHash(); };
 $('dayBtn').onclick = () => setHour(11);
 $('nightBtn').onclick = () => setHour(20.5);
 $<HTMLInputElement>('hour').oninput = (ev) => setHour(Number((ev.target as HTMLInputElement).value));
@@ -449,14 +573,15 @@ window.addEventListener('keydown', (ev) => {
 });
 
 setHour(state.hour, false);
-if (state.tag !== 'all' && !visible().some((e) => e.design.key === state.key)) state.key = visible()[0]?.design.key ?? state.key; // ?tag=london opens on a landmark
-renderFilters(); renderGrid(); showCurrent(); renderSpec();
+if ((state.tag !== 'all' || state.motion) && !visible().some((e) => e.design.key === state.key)) state.key = visible()[0]?.design.key ?? state.key; // ?tag=london opens on a landmark, m=1 on moving parts
+renderFilters(); renderGrid(); showCurrent(); renderSpec(); setInside(state.inside);
 shootThumbs();
 requestAnimationFrame(tick);
 
 /** For headless checks and the console. */
 (window as unknown as { viewer: object }).viewer = {
   select, setFilter, setHour, entries: () => entries.map((e) => e.design.key),
+  setMotion, moving: () => entries.filter(moves).map((e) => e.design.key),
   thumbsReady: () => thumbs.size === entries.length,
   setSpin: (on: boolean) => { state.spin = on; $<HTMLInputElement>('spin').checked = on; },
   setYaw: (y: number) => { yaw = y; },
@@ -464,4 +589,6 @@ requestAnimationFrame(tick);
   setView, setLineup: (on: boolean) => { state.lineup = on; $<HTMLInputElement>('lineup').checked = on; writeHash(); showCurrent(); },
   ladders: () => LADDERS.map((l) => ({ group: l.group.id, keys: l.tiers.map((k) => entries.find((x) => x.kind.kindId === k.kindId && !x.design.draft)?.design.key) })),
   zoom: (f: number) => { frameDist *= f; },
+  setInside, rooms: () => roomsOf(current().kind), setRoom: (r: string) => { state.room = r; writeHash(); renderInsideTools(); },
+  insideLine: () => interior?.label ?? null,
 };

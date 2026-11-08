@@ -7,18 +7,15 @@ import type { Color, HelperModel, Op } from './schema';
  */
 type Prim = Extract<Op, { 0: 'box' | 'roof' | 'cyl' | 'cone' | 'wheel' }>;
 export const HELPERS: Record<string, { args: string[]; minArgs: number; expand(a: (number | Color)[]): Prim[] }> = {
+  /**
+   * A tower crane's mast only: the jib, counter-jib, cab, cable and hook are drawn turning by the client's ambient pass
+   * (client/src/render/ambient.ts finds the mast by this exact box: 0.06 square, yellow, 0.8 or taller).
+   */
   crane: {
     args: ['x', 'y', 'z', 'mastH'], minArgs: 4,
     expand: ([x, y, z, mastH]) => {
       const X = x as number, Y = y as number, Z = z as number, M = mastH as number;
-      return [
-        ['box', 0.06, M, 0.06, X, Y, Z, 'yellow'],
-        ['box', 0.66, 0.05, 0.05, X + 0.18, Y + M - 0.05, Z, 'yellow'],
-        ['box', 0.1, 0.08, 0.08, X - 0.22, Y + M - 0.1, Z, 'dark'],
-        ['box', 0.1, 0.1, 0.1, X + 0.02, Y + M - 0.16, Z + 0.06, 'steel'],
-        ['cyl', 0.006, 0.006, 0.4, X + 0.42, Y + M - 0.45, Z, 'dark', 4],
-        ['box', 0.05, 0.04, 0.05, X + 0.42, Y + M - 0.49, Z, 'dark'],
-      ];
+      return [['box', 0.06, M, 0.06, X, Y, Z, 'yellow']];
     },
   },
   flag: {

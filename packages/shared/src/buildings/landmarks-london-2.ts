@@ -34,13 +34,31 @@ const pinnacles = (n: number, a: number, b: number, at: number, y: number, along
     const t = a + ((b - a) * i) / Math.max(1, n - 1);
     return ['taper', 0.035 * s, 0.035 * s, 0, 0, 0.13 * s, alongX ? t : at, y, alongX ? at : t, color];
   });
-/** A union flag on a pole: navy field with a white and a red cross, flying towards +x. */
+/** A simplified union flag on a pole: navy field with a white and a red cross, no saltires, flying towards +x. */
 const unionFlag = (x: number, y: number, z: number, pole = 0.32): Op[] => [
   ['cyl', 0.006, 0.008, pole, x, y, z, 'steel', 4],
   ['box', 0.16, 0.1, 0.008, x + 0.085, y + pole - 0.11, z, 'navy'],
   ['box', 0.16, 0.026, 0.01, x + 0.085, y + pole - 0.073, z, 'white'], ['box', 0.03, 0.1, 0.01, x + 0.085, y + pole - 0.11, z, 'white'],
   ['box', 0.16, 0.013, 0.012, x + 0.085, y + pole - 0.067, z, 'red'], ['box', 0.016, 0.1, 0.012, x + 0.085, y + pole - 0.11, z, 'red'],
 ];
+/**
+ * The union flag proper on a pole, flying towards +x: the navy field, St Andrew's white saltire with St Patrick's red
+ * saltire over it (a box cannot turn, so each diagonal is a taper whose top is shifted to the far corner of the cloth),
+ * and St George's red cross with its white fimbriation on top. Each layer is a little thicker than the one below, so it
+ * shows on both faces.
+ */
+const unionJack = (x: number, y: number, z: number, pole = 0.32): Op[] => {
+  const W = 0.16, H = 0.1, cx = x + 0.085, fy = y + pole - 0.11; // the cloth: W along x, H tall, centred on cx, foot at fy
+  const diag = (w: number, d: number, up: boolean, color: Color): Op =>
+    ['taper', w, d, w, d, H, cx - (up ? 1 : -1) * ((W - w) / 2), fy, z, color, { shift: [(up ? 1 : -1) * (W - w), 0] }];
+  return [
+    ['cyl', 0.006, 0.008, pole, x, y, z, 'steel', 4],
+    ['box', W, H, 0.008, cx, fy, z, 'navy'],
+    diag(0.04, 0.01, true, 'white'), diag(0.04, 0.01, false, 'white'), diag(0.016, 0.012, true, 'red'), diag(0.016, 0.012, false, 'red'),
+    ['box', W, 0.026, 0.014, cx, fy + H / 2 - 0.013, z, 'white'], ['box', 0.03, H, 0.014, cx, fy, z, 'white'],
+    ['box', W, 0.013, 0.016, cx, fy + H / 2 - 0.0065, z, 'red'], ['box', 0.016, H, 0.016, cx, fy, z, 'red'],
+  ];
+};
 /** Merlons along a wall top: n teeth along x (or z) centred on (x, z), the wall `thick` deep. */
 const merlons = (n: number, len: number, x: number, y: number, z: number, alongX: boolean, thick: number, color: Color): Op[] =>
   repeat(n, (i): Op => {
@@ -368,7 +386,7 @@ const towerOps = (): Op[] => {
     ops.push(['box', 0.16, TH, 0.16, x, 0.02, z, CAEN], ['box', 0.18, 0.03, 0.18, x, 0.02 + TH, z, 0xdcd5c4], ...cupola(x, 0.05 + TH, z, 0.085));
   }
   { const x = WX - (WW / 2 - 0.02), z = WZ + (WD / 2 - 0.02); ops.push(['cyl', 0.1, 0.1, TH + 0.04, x, 0.02, z, CAEN, 14], ...cupola(x, 0.06 + TH, z, 0.1)); }
-  ops.push(...unionFlag(WX + 0.15, 0.02 + WH, WZ + 0.1, 0.34));
+  ops.push(...unionJack(WX + 0.15, 0.02 + WH, WZ + 0.1, 0.34));
   return ops;
 };
 

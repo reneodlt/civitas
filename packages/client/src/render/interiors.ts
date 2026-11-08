@@ -1,9 +1,9 @@
 import {
-  Scene, Group, Mesh, BoxGeometry, CylinderGeometry, SphereGeometry, PlaneGeometry, MeshLambertMaterial, MeshBasicMaterial, ShaderMaterial,
+  Scene, Group, Mesh, BoxGeometry, CylinderGeometry, ConeGeometry, SphereGeometry, PlaneGeometry, MeshLambertMaterial, MeshBasicMaterial, ShaderMaterial,
   HemisphereLight, DirectionalLight, PointLight, PerspectiveCamera, Color, Matrix4, Vector3, Frustum,
   type Object3D, type Material, type BufferGeometry, type WebGLRenderer, type Texture,
 } from 'three';
-import { hash2, familyOf, Zone, LifeStage, VENUE_WORDS, tvOnAt, type CitizenInfo, type VenueType } from '@msimcity/shared';
+import { hash2, familyOf, Zone, LifeStage, VENUE_WORDS, VENUE_TYPES, PARK_ACTIVITY_TEXT, tvOnAt, type CitizenInfo, type VenueType, type ParkActivity } from '@msimcity/shared';
 import { Crowd, lookOf, EYE, type Look } from './people';
 import { sceneUniforms } from './materials';
 
@@ -18,33 +18,44 @@ import { sceneUniforms } from './materials';
  */
 
 /** tile units per metre (people.ts figures: a scale-1 adult's eyes at EYE tiles, about 1.6 m) */
-const M = EYE / 1.6;
+export const M = EYE / 1.6;
 /** hip height of a scale-1 figure in metres (people.ts HIP = 0.19 tiles) */
-const HIP_M = 0.19 / M;
+export const HIP_M = 0.19 / M;
 
-type Rng = () => number;
-const rng = (seed: number): Rng => { let n = 0; return () => hash2(seed, 7 + n++); };
-const pick = <T>(r: Rng, a: readonly T[]) => a[Math.floor(r() * a.length)];
+export type Rng = () => number;
+export const rng = (seed: number): Rng => { let n = 0; return () => hash2(seed, 7 + n++); };
+export const pick = <T>(r: Rng, a: readonly T[]) => a[Math.floor(r() * a.length)];
 
-const WALLS = [0xe9e2d0, 0xd8e3e0, 0xe7d3c4, 0xcfd8e6, 0xe6e1b8, 0xc9d6bf, 0xeadbd9, 0xb9c8cf, 0xf1ece4, 0x9fb3a8, 0xd9c2a6, 0xc7b8d4];
-const FLOORS = [0x8a6a4a, 0x9e7a52, 0x6e523a, 0xb08d64, 0x5a4232, 0xc4a57c, 0x8c8478, 0x6a7380, 0x7b6a5c];
-const SOFA = [0x5a6e8a, 0x8a4a3a, 0x4a5a4a, 0x9a9488, 0x3a3f4a, 0xb08a5a, 0x6a4a6a, 0x2f5a5a, 0xc0b8a8, 0x7a2f3a];
-const RUG = [0xa8463a, 0x3a5a8a, 0xc8b48a, 0x6a8a5a, 0x8a5a7a, 0xd8d0c0, 0x4a4a52, 0xc07a3a];
-const WOOD = [0x7a5638, 0x5a3e2a, 0xa07850, 0x3e2a1e, 0xd0b48c, 0xe8e4dc];
-const BRIGHT = [0xc0392b, 0x2e86de, 0x27ae60, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x16a085, 0xecf0f1, 0x34495e, 0xd35400];
-const CABINETS = [0xf2efe8, 0x5a6e5a, 0x2f3e52, 0xd8cdb8, 0x8a9aa8, 0xa07850, 0x3a3a3c];
+export const WALLS = [0xe9e2d0, 0xd8e3e0, 0xe7d3c4, 0xcfd8e6, 0xe6e1b8, 0xc9d6bf, 0xeadbd9, 0xb9c8cf, 0xf1ece4, 0x9fb3a8, 0xd9c2a6, 0xc7b8d4];
+export const FLOORS = [0x8a6a4a, 0x9e7a52, 0x6e523a, 0xb08d64, 0x5a4232, 0xc4a57c, 0x8c8478, 0x6a7380, 0x7b6a5c];
+export const SOFA = [0x5a6e8a, 0x8a4a3a, 0x4a5a4a, 0x9a9488, 0x3a3f4a, 0xb08a5a, 0x6a4a6a, 0x2f5a5a, 0xc0b8a8, 0x7a2f3a];
+export const RUG = [0xa8463a, 0x3a5a8a, 0xc8b48a, 0x6a8a5a, 0x8a5a7a, 0xd8d0c0, 0x4a4a52, 0xc07a3a];
+export const WOOD = [0x7a5638, 0x5a3e2a, 0xa07850, 0x3e2a1e, 0xd0b48c, 0xe8e4dc];
+export const BRIGHT = [0xc0392b, 0x2e86de, 0x27ae60, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x16a085, 0xecf0f1, 0x34495e, 0xd35400];
+export const CABINETS = [0xf2efe8, 0x5a6e5a, 0x2f3e52, 0xd8cdb8, 0x8a9aa8, 0xa07850, 0x3a3a3c];
 
 // ---- where they are ----------------------------------------------------------------------------
 
+/** The free-time places' outings (docs/leisure.md) and what people do in a park: scenes built by render/leisureRooms.ts. */
+export type LeisureRoom = Exclude<VenueType, 'park' | 'cinema' | 'theatre' | 'sports' | 'library'> | ParkActivity | 'band';
 export type RoomKind = 'lounge' | 'kitchen' | 'bed'
   | 'office' | 'police' | 'shop' | 'factory' | 'ward' | 'fire' | 'yard' | 'hub'
-  | 'cinema' | 'theatre' | 'sports' | 'library' | 'cafe' | 'bar' | 'doctor';
+  | 'cinema' | 'theatre' | 'sports' | 'library' | 'cafe' | 'bar' | 'doctor' | LeisureRoom;
+/** A room's builder: lays out the kit and says where the eyes are. */
+export type RoomBuilder = (k: Kit, c: Ctx) => View;
+/**
+ * Rooms registered by other modules (render/leisureRooms.ts registers the free-time places and the park's activities on
+ * import), so this file need not import them; placeOf only offers a room that has a builder.
+ */
+export const EXTRA_ROOMS: Partial<Record<RoomKind, RoomBuilder>> = {};
 
 export interface Place {
   room: RoomKind;
   /** changes when a different room should be built (a new home, workplace or room in the home) */
   key: string;
   seed: number;
+  /** at a leisure place the server named (CitizenInfo.venue): its door tile and kind, and a seed of the place itself, so it looks the same to everyone */
+  venue?: { x: number; y: number; kind: number; seed: number };
 }
 
 const stageOf = (age: number, activity: string) => (age < 18 ? LifeStage.Child : /retired/.test(activity) || age >= 66 ? LifeStage.Retired : LifeStage.Adult);
@@ -84,19 +95,28 @@ export function placeOf(info: CitizenInfo, hour: number): Place | null {
       [Zone.Fire]: 'fire', [Zone.Yard]: 'yard', [Zone.Hub]: 'hub' } as Record<number, RoomKind>)[familyOf(e.kind)] ?? 'office';
     return { room, seed, key: `work:${seed}:${room}` };
   }
-  let room: RoomKind | null = null;
-  if (act === 'seeing a doctor at the hospital') room = 'doctor';
-  else if (act === 'at a café') room = 'cafe';
-  else if (act === 'out at a bar') room = 'bar';
-  else {
-    for (const t of ['cinema', 'theatre', 'sports', 'library'] as VenueType[]) {
-      if (act === VENUE_WORDS[t].at || act === VENUE_WORDS[t].event) room = t as RoomKind;
-    }
-  }
-  if (!room) return null;
-  // the client is not told which venue; seed by the visitor and the day's hour block so a visit keeps its look
+  const room = leisureRoomOf(act);
+  if (!room || (!BASE_ROOMS.has(room) && !EXTRA_ROOMS[room])) return null;
+  // seeded by the visitor (their seat, who sits round them); a free-time place is also seeded by the place itself (info.venue)
   const seed = (info.id * 31 + 7) | 0;
-  return { room, seed, key: `venue:${seed}:${room}` };
+  const v = info.venue, venue = v ? { ...v, seed: (v.x * 7919 + v.y * 104729 + v.kind * 31) | 0 } : undefined;
+  return { room, seed, venue, key: `venue:${seed}:${room}:${v ? `${v.x},${v.y}` : ''}` };
+}
+/** Rooms this file builds itself (the rest come from EXTRA_ROOMS). */
+const BASE_ROOMS = new Set<RoomKind>(['cinema', 'theatre', 'sports', 'library', 'cafe', 'bar', 'doctor']);
+const PARK_ROOMS = Object.entries(PARK_ACTIVITY_TEXT) as [ParkActivity, string][];
+/** The room an outing's activity line puts someone in: a café, a bar, the doctor, a venue type or a park activity. */
+export function leisureRoomOf(act: string): RoomKind | null {
+  if (act === 'seeing a doctor at the hospital') return 'doctor';
+  if (act === 'at a café') return 'cafe';
+  if (act === 'out at a bar') return 'bar';
+  if (act === VENUE_WORDS.park.event) return 'band';
+  for (const [a, text] of PARK_ROOMS) if (act === text) return a;
+  for (const t of VENUE_TYPES) {
+    if (t === 'park') continue;
+    if (act === VENUE_WORDS[t].at || act === VENUE_WORDS[t].event) return t as RoomKind;
+  }
+  return null;
 }
 
 /** A home's seed: its paint, furniture, the TV's channel (render/tv.ts asks for the citizen panel's "watching" line). */
@@ -130,9 +150,9 @@ export function setTvSource(src: TvSource | null) { tvSource = src; }
 
 // ---- shaders ---------------------------------------------------------------------------------
 
-const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+export const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
 /** a window: the sky from the game clock over a skyline whose windows light up at night (each its own) */
-const WINDOW_FRAG = /* glsl */ `
+export const WINDOW_FRAG = /* glsl */ `
 uniform vec3 uSky; uniform float uNight; uniform float uSeed; uniform float uAspect; uniform float uLow; varying vec2 vUv;
 float h1(float n) { return fract(sin(n * 127.1 + uSeed * 311.7) * 43758.5453); }
 float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed * 17.0) * 43758.5453); }
@@ -358,7 +378,7 @@ void main() {
 }`;
 
 /** One glowing screen and the light it throws: a new shot every few seconds, flickering a little within it. */
-class Screen {
+export class Screen {
   mat: ShaderMaterial;
   on = 1;
   /** a TV set: the seed its channel is picked by (a household's, a pub's) and whether it is in a home; null for other screens */
@@ -430,7 +450,7 @@ class Screen {
 
 // ---- the kit: boxes, cylinders, windows and lights in metres ---------------------------------------
 
-interface Body {
+export interface Body {
   look: Look;
   x: number; y: number; z: number; yaw: number;
   /** gait swing (0 standing or seated), pose (+phone, -work) and a phase offset */
@@ -441,13 +461,14 @@ interface Body {
   move?: (t: number, b: Body) => void;
 }
 
-class Kit {
+export class Kit {
   scene = new Scene();
   parent: Object3D = this.scene;
   W = 4; D = 4; H = 2.5;
   readonly boxG = new BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   readonly cylG = new CylinderGeometry(0.5, 0.5, 1, 14).translate(0, 0.5, 0);
   readonly ballG = new SphereGeometry(0.5, 12, 8);
+  readonly coneG = new ConeGeometry(0.5, 1, 12).translate(0, 0.5, 0);
   readonly planeG = new PlaneGeometry(1, 1);
   private mats = new Map<number, MeshLambertMaterial>();
   private own: Material[] = [];
@@ -499,6 +520,12 @@ class Kit {
   }
   cyl(x: number, y: number, z: number, r: number, h: number, col: number | Material) {
     const m = this.mesh(this.cylG, col);
+    m.position.set(x, y, z); m.scale.set(r * 2, h, r * 2);
+    return m;
+  }
+  /** a cone of radius r and height h with its base at y */
+  cone(x: number, y: number, z: number, r: number, h: number, col: number | Material) {
+    const m = this.mesh(this.coneG, col);
     m.position.set(x, y, z); m.scale.set(r * 2, h, r * 2);
     return m;
   }
@@ -636,7 +663,7 @@ class Kit {
     for (const m of this.mats.values()) m.dispose();
     for (const m of this.own) m.dispose();
     for (const m of this.windows) m.dispose();
-    this.boxG.dispose(); this.cylG.dispose(); this.ballG.dispose(); this.planeG.dispose();
+    this.boxG.dispose(); this.cylG.dispose(); this.ballG.dispose(); this.coneG.dispose(); this.planeG.dispose();
     this.crowd.mesh.geometry.dispose();
     this.crowd.mesh.dispose();
   }
@@ -645,18 +672,29 @@ const FRUSTUM = new Frustum(), PROJ = new Matrix4();
 const TMP_M = new Matrix4(), WARM_WHITE = new Color(0xfff2dc), MOON = new Color(0x8ea4e0);
 
 /** where the viewer's eyes are and what they look at; glances are other things they look at now and then */
-interface View {
+export interface View {
   eye: Vector3; aim: Vector3; glances: Vector3[]; label: string; lying?: boolean;
   /** re-run every couple of seconds: lights and screens that follow the clock without rebuilding the room */
   live?: (hour: number) => string | void;
+  /**
+   * A moving eye (a swing, a skater going round, a kart, a trampoline): called every frame with seconds, it moves `eye` in
+   * place and may set where the head points (radians: yaw 0 looks toward -z, pitch up positive, roll). Without a look the
+   * head keeps glancing about the room as usual.
+   */
+  move?: (t: number, eye: Vector3) => { yaw: number; pitch: number; roll?: number } | void;
+  /**
+   * Above the real town (the Ferris wheel): the eye's place in world tiles this frame. The first-person view then draws
+   * the city from there with the room's own camera turn, and the room (the gondola) over it (render/fpv.ts).
+   */
+  overWorld?: (t: number) => { x: number; y: number; z: number };
 }
 
 /** a local point in a group (x, z, ry) to world */
-const world = (gx: number, gz: number, ry: number, lx: number, lz: number): [number, number] => [gx + lx * Math.cos(ry) + lz * Math.sin(ry), gz - lx * Math.sin(ry) + lz * Math.cos(ry)];
+export const world = (gx: number, gz: number, ry: number, lx: number, lz: number): [number, number] => [gx + lx * Math.cos(ry) + lz * Math.sin(ry), gz - lx * Math.sin(ry) + lz * Math.cos(ry)];
 
 // ---- home ------------------------------------------------------------------------------------
 
-interface Ctx {
+export interface Ctx {
   info: CitizenInfo;
   place: Place;
   hour: number;
@@ -666,17 +704,17 @@ interface Ctx {
 }
 
 /** furniture pieces shared by several rooms */
-function plant(k: Kit, r: Rng, x: number, z: number, big = r() < 0.5) {
+export function plant(k: Kit, r: Rng, x: number, z: number, big = r() < 0.5) {
   const pot = pick(r, [0xb8643a, 0xe8e4dc, 0x3a3a3c, 0x6a8a9a, 0xc8a878]);
   const s = big ? 1 : 0.55;
   k.cyl(x, 0, z, 0.16 * s, 0.32 * s, pot);
   const leaf = pick(r, [0x3e7a3a, 0x2f6a40, 0x5a8a3a, 0x4a7a5a]);
   for (let i = 0; i < 3; i++) k.ball(x + (r() - 0.5) * 0.2 * s, (0.5 + i * 0.22 + r() * 0.1) * s, z + (r() - 0.5) * 0.2 * s, 0.22 * s, 0.26 * s, 0.22 * s, leaf);
 }
-function chair(k: Kit, x: number, z: number, ry: number, col: number, seatH = 0.46, back = 0.5) {
+export function chair(k: Kit, x: number, z: number, ry: number, col: number, seatH = 0.46, back = 0.5) {
   k.group(x, z, ry, () => { k.box(0, 0, 0, 0.44, seatH, 0.44, col); k.box(0, seatH, -0.2, 0.44, back, 0.05, col); });
 }
-function picture(k: Kit, r: Rng, side: 'back' | 'left' | 'right' | 'front', u: number, y: number) {
+export function picture(k: Kit, r: Rng, side: 'back' | 'left' | 'right' | 'front', u: number, y: number) {
   const w = 0.35 + r() * 0.5, h = 0.3 + r() * 0.45;
   k.onWall(side, u, () => {
     k.box(0, y, 0.015, w + 0.06, h + 0.06, 0.03, pick(r, [0x2a2a2a, 0xd8c8a8, 0xf4f4f0, 0x6a4a2a]));
@@ -684,7 +722,7 @@ function picture(k: Kit, r: Rng, side: 'back' | 'left' | 'right' | 'front', u: n
     k.box((r() - 0.5) * w * 0.5, y + 0.03 + h * 0.2, 0.025, w * 0.4, h * 0.45, 0.03, pick(r, [...BRIGHT, ...WALLS]));
   });
 }
-function bookshelf(k: Kit, r: Rng, x: number, z: number, ry: number, w = 0.9, h = 1.9, col = pick(r, WOOD)) {
+export function bookshelf(k: Kit, r: Rng, x: number, z: number, ry: number, w = 0.9, h = 1.9, col = pick(r, WOOD)) {
   k.group(x, z, ry, () => {
     k.box(0, 0, 0, w, h, 0.32, col);
     const rows = Math.floor(h / 0.38);
@@ -700,7 +738,7 @@ function bookshelf(k: Kit, r: Rng, x: number, z: number, ry: number, w = 0.9, h 
     }
   });
 }
-function pet(k: Kit, r: Rng, x: number, y: number, z: number) {
+export function pet(k: Kit, r: Rng, x: number, y: number, z: number) {
   const ry = r() * 6.28;
   if (r() < 0.6) { // a cat curled up
     const col = pick(r, [0x2a2a2a, 0xd88a3a, 0x8a8a8a, 0xf0ece4, 0x6a4a32]);
@@ -740,7 +778,7 @@ function homeShell(k: Kit, c: Ctx, W: number, D: number) {
   return { wall, floor };
 }
 /** a ceiling light fitting: a shade that glows with the light */
-function ceilingLight(k: Kit, x: number, z: number, H: number, drop = 0.35, col = 0xfff0dc) {
+export function ceilingLight(k: Kit, x: number, z: number, H: number, drop = 0.35, col = 0xfff0dc) {
   k.cyl(x, H - drop, z, 0.008, drop, 0x2a2a2a);
   k.cyl(x, H - drop - 0.16, z, 0.17, 0.18, k.glow(col, 1.1, 'lamp'));
   k.ceil.position.set(x, H - drop - 0.3, z);
@@ -960,10 +998,10 @@ function bedroom(k: Kit, c: Ctx): View {
 // ---- workplaces --------------------------------------------------------------------------------
 
 /** someone at work there: a stand-in colleague with a stable id from the place, dressed for the job */
-const colleague = (seed: number, i: number, kind: number, evening = false, stage: number = LifeStage.Adult) =>
+export const colleague = (seed: number, i: number, kind: number, evening = false, stage: number = LifeStage.Adult) =>
   lookOf(2_000_000 + Math.floor(hash2(seed, 900 + i) * 1_000_000), kind, stage, kind !== 0, evening);
 
-function strips(k: Kit, W: number, D: number, H: number, nx: number, nz: number, col = 0xf4f8ff) {
+export function strips(k: Kit, W: number, D: number, H: number, nx: number, nz: number, col = 0xf4f8ff) {
   const m = k.glow(col, 1.6);
   for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) k.box((i - (nx - 1) / 2) * (W / nx), H - 0.04, (j - (nz - 1) / 2) * (D / nz), 0.3, 0.03, 1.2, m);
   k.ceil.position.set(0, H - 0.4, 0);
@@ -1464,7 +1502,7 @@ export class Interior {
     const work = place.key.startsWith('work:');
     const viewer = lookOf(info.id, work ? familyOf(info.employer?.kind ?? 0) : 0, stage, work, evening);
     this.ctx = { info, place, hour, evening, viewer, stage };
-    const B: Record<RoomKind, (k: Kit, c: Ctx) => View> = {
+    const B: Partial<Record<RoomKind, RoomBuilder>> = {
       lounge, kitchen, bed: bedroom,
       office: (k, c) => office(k, c, false), police: (k, c) => office(k, c, true), shop, factory: (k, c) => factory(k, c, false), yard: (k, c) => factory(k, c, true),
       ward, fire: fireStation, hub,
@@ -1472,7 +1510,8 @@ export class Interior {
       cafe: (k, c) => cafeOrBar(k, c, false), bar: (k, c) => cafeOrBar(k, c, true), doctor,
     };
     this.k = new Kit();
-    this.v = B[place.room](this.k, this.ctx);
+    const build = (B as Partial<Record<RoomKind, RoomBuilder>>)[place.room] ?? EXTRA_ROOMS[place.room];
+    this.v = build!(this.k, this.ctx);
     this.mates = this.matesKey(info, hour);
     this.label = this.v.label;
     this.aimAt(this.v.aim);
@@ -1510,17 +1549,36 @@ export class Interior {
     this.yaw += (((this.gy - this.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * kf;
     this.pitch += (this.gp - this.pitch) * kf;
     const ph = hash2(id, 41) * 6.28, lying = !!this.v.lying;
+    // a moving eye: the room moves it (and may turn the head), then the idle drift goes on top
+    const look = this.v.move?.(t, this.v.eye);
+    if (look) { this.yaw = look.yaw; this.pitch = look.pitch; }
     const yaw = this.yaw + 0.035 * Math.sin(t * 0.21 + ph) + 0.015 * Math.sin(t * 0.57 + ph * 2);
     const pitch = this.pitch + 0.02 * Math.sin(t * 0.31 + ph * 3) + (lying ? 0.01 * Math.sin(t * 0.9) : 0);
     const e = this.v.eye, c = this.camera;
     c.position.set(e.x, e.y + (lying ? 0.006 : 0.004) * Math.sin(t * (lying ? 0.9 : 1.3) + ph), e.z);
     c.rotation.set(0, 0, 0);
     c.rotation.order = 'YXZ';
-    c.rotation.y = yaw; c.rotation.x = pitch; c.rotation.z = lying ? 0.08 : 0.01 * Math.sin(t * 0.17 + ph);
+    c.rotation.y = yaw; c.rotation.x = pitch; c.rotation.z = (look?.roll ?? 0) + (lying ? 0.08 : 0.01 * Math.sin(t * 0.17 + ph));
+    this.worldAt = this.v.overWorld ? this.v.overWorld(t) : null;
     // which TV sets are on screen: only those may ask for the live feed
     c.updateMatrixWorld();
     FRUSTUM.setFromProjectionMatrix(PROJ.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse));
     for (const s of this.k.screens) if (s.set && s.mesh) s.visible = FRUSTUM.intersectsObject(s.mesh);
+  }
+
+  /** Riding above the real town this frame (the Ferris wheel): the eye in world tiles, else null. render/fpv.ts reads it. */
+  worldAt: { x: number; y: number; z: number } | null = null;
+  /** Is this room drawn over the city (its scene has no background of its own)? */
+  get overWorld() { return !!this.v.overWorld; }
+  /** Draw the room over what is already in the target (the city), sharing nothing but the picture: depth cleared first. */
+  renderOver(renderer: WebGLRenderer) {
+    // a colour background makes three.js clear the target whatever autoClear says: the city drawn first must stay
+    this.k.scene.background = null;
+    const ac = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(this.k.scene, this.camera);
+    renderer.autoClear = ac;
   }
 
   /** the TV sets in the room (debug and the TV check) */

@@ -64,13 +64,22 @@ services. Fire posts come with Emergency services (civ1: 20 housed, $400; the go
 
 ## What the player sees
 
-- **On the building**: flames over the roof (5-9 tongues), soot rising and drifting downwind, an orange glow that carries
-  at night, and a scorch on the ground. Following the organic-effects rule each tongue has its own height, width, flicker
-  rate and phase, sway and place on the roof; each puff its own clock, rise, size, heading off the town's wind and wobble;
-  each fire its own count of each and its own scorch outline, all from hashes. Size follows the fire's own course: it
-  grows as it takes hold; under the hoses the flames die back and the smoke turns to pale steam; afterwards the ruin
-  smoulders for `aftermathHours` (6) and the scorch fades (darkest where it burnt down). `client/src/render/fires.ts`,
-  four instanced passes, one draw call each.
+- **On the building**: the fire burns at the windows of the building as drawn. It starts at one window (hashed from the
+  fire's seed) and spreads across the facades, outward and upward, as the share burnt grows (`client/src/render/fireSpots.ts`
+  reads each design's window cells from the geometry the kit built: a facade box's cells, or the legacy grid of seven
+  across a tile by five up it). Each window it reaches glows with the fire inside, then a tongue of flame licks out of it
+  and up the wall, dark smoke pours out, embers rise and soot smears the wall above the lintel. Past 35% burnt it breaks
+  through the roof: tongues over the roof (5-9), the big smoke column, an orange glow that carries at night and the light
+  it throws on the ground round the building, and a scorch on the ground. Following the organic-effects rule each tongue
+  has its own height, width, flicker rate and phase, sway and place; each puff its own clock, rise, size, heading off the
+  town's wind and wobble; each pane its own beat; each fire its own first window and order of spread, its own count of
+  each and its own scorch outline, all from hashes. Size follows the fire's own course: it grows as it takes hold; under
+  the hoses (played on the burning windows) the flames die back and the smoke turns to pale steam; afterwards the panes
+  are black holes, the soot stays, the ruin smoulders for `aftermathHours` (6) and the scorch fades (darkest where it
+  burnt down). A building whose windows the client cannot see (its chunk not loaded, a shed with none) burns at the roof.
+  `client/src/render/fires.ts`, nine instanced passes, one draw call each; the flicker is the GPU's, and the per-frame
+  work follows the motion switch (`render/motionGate.ts`, docs/leisure.md section 9: every frame, every other, or frozen;
+  embers only at full).
 - **The engine** on the road in fire red with its lights, weaving down the crown of the road past a stopped queue, then
   parked at the kerb with its hose on the fire: a stream of drops arcing from the engine to the facade, each on its own
   clock and wobble (`FireDTO.hx, hy`). The bucket chain throws in bursts from three to five points round the building,

@@ -5,6 +5,9 @@ import { Signs, SIGN_MAX_DIST, signLabel, type SignInfo } from './signs';
 import { sceneUniforms } from './materials';
 import { AdvertsView, type AdHostItem } from './adverts';
 import { RotorsView } from './rotors';
+import { WheelsView } from './wheels';
+import { LeisureAnims } from './leisureAnims';
+import { AmbientView } from './ambient';
 
 const MAX_INSTANCES = 60000;
 
@@ -81,6 +84,12 @@ export class Buildings {
   readonly adverts = new AdvertsView();
   /** the wind turbines' nacelles and rotors, turning (render/rotors.ts): the kit builds only their towers */
   readonly rotors = new RotorsView();
+  /** the funfairs' Ferris wheels, turning (render/wheels.ts): the kit builds only their legs and axle */
+  readonly wheels = new WheelsView();
+  /** the leisure places' moving parts: karts round a track and the like (render/leisureAnims.ts, rigs in leisureRigs.ts) */
+  readonly anims = new LeisureAnims();
+  /** chimney smoke and the cranes' jibs over sites and yards (render/ambient.ts) */
+  readonly ambient = new AmbientView();
   private geomIds = new Map<string, number>();
   private farIds = new Map<string, number>();
   private perChunk = new Map<string, ChunkLod>();
@@ -100,6 +109,9 @@ export class Buildings {
   private sunDir = new Vector3(0, 1, 0);
   /** buildings left out of the draw list by the cull right now, for the perf readout */
   culledCount = 0;
+  /** every built building by its door tile: its design key and matrix (the fires put their flames at its windows, render/fires.ts) */
+  private byDoor = new Map<string, { key: string; matrix: Matrix4 }>();
+  private doorsOf = new Map<string, string[]>();
 
   constructor(material: Material) {
     buildModels();
@@ -119,6 +131,9 @@ export class Buildings {
     this.mesh.add(this.signs.mesh);
     this.mesh.add(this.adverts.mesh);
     this.mesh.add(this.rotors.group);
+    this.mesh.add(this.wheels.group);
+    this.mesh.add(this.anims.group);
+    this.mesh.add(this.ambient.group);
   }
 
   setChunk(key: string, items: Placement[]) {
@@ -127,6 +142,7 @@ export class Buildings {
     const ids: number[] = [], full: number[] = [], farG: number[] = [], px: number[] = [], pz: number[] = [], thr: number[] = [];
     const signItems: ChunkLod['signItems'] = [];
     const adItems: AdHostItem[] = [];
+    const doors: string[] = [];
     for (const item of items) {
       if (item.ad && AD_SLOTS[item.key]) adItems.push({ key: item.key, matrix: item.matrix, door: [item.ad[0], item.ad[1]], parcel: item.ad[2] });
       const gid = this.geomIds.get(item.key);
@@ -143,7 +159,9 @@ export class Buildings {
       px.push(x); pz.push(z);
       thr.push(FAR_AT + (hash2(Math.floor(x * 4) + 17, Math.floor(z * 4) + 5) - 0.5) * 2 * FAR_JITTER);
       if (item.sign) signItems.push({ key: item.key, matrix: item.matrix, sign: item.sign });
+      if (item.sign && item.ad) { const dk = `${item.ad[0]},${item.ad[1]}`; this.byDoor.set(dk, { key: item.key, matrix: item.matrix }); doors.push(dk); }
     }
+    if (doors.length) this.doorsOf.set(key, doors);
     if (ids.length) {
       const c: ChunkLod = {
         ids, full: Int32Array.from(full), far: Int32Array.from(farG), px: Float32Array.from(px), pz: Float32Array.from(pz), thr: Float32Array.from(thr),
@@ -157,10 +175,16 @@ export class Buildings {
     }
     if (adItems.length) this.adverts.setChunk(key, adItems);
     this.rotors.setChunk(key, items);
+    this.wheels.setChunk(key, items);
+    this.anims.setChunk(key, items);
+    this.ambient.setChunk(key, items);
     // With per-object culling and sorting off, three only rebuilds its multi-draw
     // list when this flag is set, and addInstance/deleteInstance do not set it.
     (this.mesh as unknown as { _visibilityChanged: boolean })._visibilityChanged = true;
   }
+
+  /** The built building whose door is (x, y): its design key and world matrix; null while its chunk is not loaded or it is a site. */
+  placementAt(x: number, y: number): { key: string; matrix: Matrix4 } | null { return this.byDoor.get(`${x},${y}`) ?? null; }
 
   /** buildings placed for a chunk (the rebuild accounting, render/chunkWork.ts) */
   countOf(key: string): number { return this.perChunk.get(key)?.ids.length ?? 0; }
@@ -170,6 +194,11 @@ export class Buildings {
     this.signs.clear(key);
     this.adverts.clear(key);
     this.rotors.clear(key);
+    this.wheels.clear(key);
+    this.anims.clear(key);
+    this.ambient.clear(key);
+    for (const dk of this.doorsOf.get(key) ?? []) this.byDoor.delete(dk);
+    this.doorsOf.delete(key);
     if (!c) return;
     for (const id of c.ids) this.mesh.deleteInstance(id);
     this.farCount -= c.nFar;

@@ -1,6 +1,10 @@
 import type { KindDef } from './schema';
 import { Zone } from './codes';
 import { repeat } from './helpers';
+import { van, fence, ASPHALT } from './tierkit';
+
+/** who redrew the thin originals (docs/buildings.md "Redesigns") */
+const FABLE = 'claude-fable-5-1';
 
 export const industrial: KindDef = {
   id: 'industrial', name: 'industrial', code: Zone.Industrial, family: 'industrial',
@@ -23,11 +27,16 @@ export const industrial: KindDef = {
       capacity: 6, wage: 14, work: 60, parking: { surface: 2, underground: 4 },
       attrs: { pollution: 1, noise: 2 },
       designs: [
-        { name: 'corrugated warehouse', height: 0.54, attrs: { goodsType: 'storage' }, ops: [
-          ['box', 0.84, 0.4, 0.74, 0, 0, 0, 'corrugated', true],
-          ['roof', 0.88, 0.14, 0.78, 0, 0.4, 0, 'roofGrey'],
-          ['box', 0.3, 0.28, 0.02, 0.1, 0, 0.38, 'dark'],
-          ['cyl', 0.04, 0.04, 0.3, -0.32, 0.4, -0.25, 'chimney', 6],
+        { name: 'corrugated warehouse with two roller doors, a gatehouse office, a flue and a van on the apron', height: 0.7, author: FABLE, attrs: { goodsType: 'storage' }, ops: [
+          ['box', 0.8, 0.4, 0.6, 0, 0, -0.12, 'corrugated', true, { name: 'shed', facade: { storeys: 1, bays: 4, sideBays: 3, margin: 0.04 } }],
+          ['garage', 'shed', 'front', 1], ['garage', 'shed', 'front', 2], ['door', 'shed', 'front', 0],
+          ['roof', 0.84, 0.16, 0.64, 0, 0.4, -0.12, 'roofGrey'],
+          ['box', 0.8, 0.006, 0.28, 0, 0, 0.36, ASPHALT],
+          ['box', 0.2, 0.22, 0.16, 0.34, 0.006, 0.36, 'pale', 'office', { name: 'office', facade: { storeys: 1, bays: 2, sideBays: 1, ground: 'door' } }],
+          ['box', 0.22, 0.02, 0.18, 0.34, 0.226, 0.36, 'dark'],
+          ['cyl', 0.03, 0.035, 0.3, -0.3, 0.4, -0.3, 'chimney', 6],
+          ...van(-0.3, 0.36, 'white', 'boxBlue', false, 0), ['box', 0.1, 0.06, 0.1, 0.05, 0, 0.3, 'timber'],
+          ...fence(-0.46, -0.1, 0.7, false, 'grey', 0.06),
         ] },
         { name: 'brick workshop with sawtooth roof and roller door', height: 0.5, ops: [
           ['box', 0.8, 0.36, 0.72, 0, 0, 0, 'brick', true],

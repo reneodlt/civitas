@@ -357,16 +357,37 @@ const FACADE_FIXED: Record<string, [number, string]> = {
  * and H), which shared/src/helipads.ts finds and helicopters land on. The office slab's pad keeps its place; the
  * hospital's moves right and its roof cross left so the bigger pad fits. Heights are unchanged.
  */
-const HELIPAD_FIXED: Record<string, [number, string]> = { '4:3:3': [756, '4280ad8e'], '7:1:0': [792, '8e57300a'] };
+const HELIPAD_FIXED: Record<string, [number, string]> = { '4:3:3': [756, '4280ad8e'] }; // the hospital ('7:1:0') has since been redesigned, below
 /**
  * Snapshot models deliberately changed since: they carry an ad slot's empty frame (docs/adverts.md section 2, buildings/
  * adslot.ts). The supermarket gets a default billboard on its flat roof; the site fence's front rail became a plywood
  * hoarding with a poster frame. Heights are unchanged.
  */
 const ADSLOT_FIXED: Record<string, [number, string]> = { '2:2:1': [432, '8fe1b839'], site: [402, 'a6732c31'] };
+/**
+ * Snapshot models redrawn since (docs/buildings.md "Redesigns"): the thinnest original designs rebuilt in their own
+ * slot with facades, an entrance, a roofscape and a forecourt, so every tile that showed the old model shows the new
+ * one. [height, vertices, fnv32]: unlike the fixes above, the height may change.
+ */
+const REDESIGNED: Record<string, [number, number, string]> = {
+  '4:1:0': [1.2, 996, '568d6d75'], '4:1:1': [1.07, 852, 'e9c0ac3e'], '4:1:2': [1.37, 1128, '784d9fa6'], '4:1:3': [0.95, 1008, '4a11b86a'],
+  '4:2:0': [2.67, 1524, '52376f65'], '4:2:1': [2.14, 1380, '859ef48c'], '4:2:2': [2.49, 1806, 'c935d902'], '4:2:3': [2.37, 1344, 'fc976a3c'],
+  '4:3:0': [3.45, 2016, '6c243966'], '4:3:1': [3.73, 2250, 'c8b7f3b2'], '4:3:2': [3.46, 2388, 'fc30be18'],
+  // the civic base kinds (one design each): the hospital keeps a helipad on its ward roof (shared/src/helipads.ts finds it)
+  '5:1:0': [1.14, 1356, '5ab34dd9'], '6:1:0': [1.35, 936, '64280e61'], '7:1:0': [1.22, 1848, 'f6840ba1'], '8:1:0': [1.02, 798, '8098eece'], 'crane': [0.9, 36, '48cbeaa9'], // the crane helper is mast-only now: the jib turns in render/ambient.ts
+  // the thinnest zone originals
+  '1:3:0': [1.4, 1524, '9ebf63ed'], '1:3:3': [1.72, 1368, 'cd67bbfd'], '2:1:0': [0.69, 468, '7c8a78c9'], '2:2:0': [0.95, 948, '5a2f7ba5'],
+  '2:3:0': [2.22, 1152, '1b0bc115'], '2:3:3': [2.34, 1176, '19ceb6c7'], '3:1:0': [0.7, 822, '6ba205be'],
+  // residential originals whose doors and bays sat over windows, redrawn with facades
+  '1:1:2': [0.72, 432, 'fc5be5ea'], '1:1:3': [0.56, 576, 'd36315b7'], '1:2:2': [0.76, 660, 'fad5642c'], '1:2:3': [0.63, 852, '335efc8b'], '1:3:2': [1.39, 1608, '98a9dc95'],
+  // commercial originals whose awnings, glazing and doors sat over windows, redrawn with facades
+  '2:1:1': [0.67, 720, 'b6a8e7f6'], '2:1:2': [0.53, 876, 'b02a9dda'], '2:1:3': [0.64, 696, '48dc35b4'], '2:2:2': [1.1, 762, '1aed2dd1'], '2:2:3': [0.85, 1140, '931e779d'],
+};
 let identical = 0, refixed = 0;
-for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
-  const fixed = FACADE_FIXED[key] ?? HELIPAD_FIXED[key] ?? ADSLOT_FIXED[key];
+for (const [key, oldHeight, oldVerts, oldHash] of OLD_MODELS) {
+  const re = REDESIGNED[key];
+  const fixed = re ? ([re[1], re[2]] as [number, string]) : FACADE_FIXED[key] ?? HELIPAD_FIXED[key] ?? ADSLOT_FIXED[key];
+  const height = re ? re[0] : oldHeight;
   const [verts, hash] = fixed ?? [oldVerts, oldHash];
   if (fixed) refixed++;
   const v = now.find((m) => m.key === key);
@@ -379,7 +400,7 @@ for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
   if (v.geometry.attributes.position.count === verts && h.toString(16) === hash && !fixed) identical++;
 }
 const drafts = allDesigns().filter((d) => d.draft);
-console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}), helipads (${Object.keys(HELIPAD_FIXED).join(' ')}) and ad slot frames (${Object.keys(ADSLOT_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
+console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}), helipads (${Object.keys(HELIPAD_FIXED).join(' ')}), ad slot frames (${Object.keys(ADSLOT_FIXED).join(' ')}) and redesigns (${Object.keys(REDESIGNED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
 if (!drafts.length) fail('expected the kiosk draft');
 if (now.some((v) => drafts.some((d) => d.key === v.key))) fail('a draft leaked into the city batch');
 // draft landmarks (landmark-drafts.ts, docs/landmarks.md): viewer only, so no tool, no live design, and the reserved ids

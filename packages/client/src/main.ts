@@ -167,6 +167,8 @@ if (params.get('hour')) { lighting.mode = 'fixed'; lighting.fixedHour = Number(p
 // ?fx=0|1|2 pins shadow quality; otherwise it adapts to frame time
 const fxParam = params.get('fx');
 if (fxParam !== null) lighting.setQuality(Number(fxParam));
+// ?anim=0|1|2 pins the leisure places' moving parts (render/leisureAnims.ts: 0 frozen, 1 half rate, 2 all); otherwise they adapt to frame time
+if (params.get('anim') !== null) buildings.anims.pin(Number(params.get('anim')));
 let frameAvg = 16, qualityTimer = 0;
 function adaptQuality(dt: number) {
   if (fxParam !== null) return;
@@ -378,6 +380,7 @@ net.on('players', (m) => {
   world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
+net.on('venues', (m) => buildings.anims.setGuests(m.v)); // who is at each leisure place: the moving parts follow the crowd
 // bus lines (client/src/lines.ts): the lines chip and panel, ribbons while it is open, and each bus's livery
 const lines = new LinesPanel(net, world, (kind, msg) => ui.toast(kind, msg), liveTick);
 // city history charts (charts.ts, docs/charts.md): the charts chip, the ` key, and a click on the population or treasury figure
@@ -1479,6 +1482,9 @@ function frame(now: number) {
   firesView.group.visible = underground.level < 0.5;
   firesView.frame(liveTickF());
   buildings.rotors.frame(liveTickF(), [rig.camera], underground.level < 0.5);
+  buildings.wheels.frame([rig.camera], underground.level < 0.5); // the funfairs' Ferris wheels (render/wheels.ts)
+  buildings.anims.frame([rig.camera], underground.level < 0.5); // the leisure places' moving parts (render/leisureAnims.ts)
+  buildings.ambient.frame([rig.camera], underground.level < 0.5); // chimney smoke and the cranes' jibs (render/ambient.ts)
   gravesView.group.visible = underground.level < 0.5;
   gravesView.frame(liveTick(), now);
   perf.lap('world');
@@ -1632,6 +1638,10 @@ ui.onSound = (id) => audio.ui(id);
 const audioReadout = new AudioReadout(audio, hud, document.getElementById('audioBtn'));
 bindReadoutKey(window, () => audioReadout.toggle());
 fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
+// the funfairs' fireworks night (render/wheels.ts): a show over each fair in range on its Saturday evening
+buildings.wheels.clock = () => ({ day: Math.floor(liveTick() / TICKS_PER_DAY), hour: liveHour() });
+firesView.placement = (x, y) => buildings.placementAt(x, y); // the fires burn at the windows of the building drawn (render/fires.ts)
+buildings.wheels.onShow = (x, y, seed) => fireworks.show(x, y, 1.5, seed);
 Object.assign((window as any).msc, { perf, lines, audio, audioReadout });
 /** the chunk rebuild scheduler (render/chunkWork.ts); setLegacy(true) brings back the old invalidation and loop for paired measurements */
 (window as any).msc.chunkWork = Object.assign(chunkWork, {

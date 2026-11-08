@@ -481,6 +481,11 @@ export interface CitizenInfo {
    * with the hours (client render/nightout.ts); an older server sends none and the view reads the evening from `activity`.
    */
   night?: { hours: number; drinks: boolean };
+  /**
+   * At a leisure place (docs/leisure.md): its door tile and kind id, so the first-person view can build that place's scene
+   * and, for the funfair's Ferris wheel, ride above the real town. Inspect only; absent at a café, bar or the doctor.
+   */
+  venue?: { x: number; y: number; kind: number };
   /** a fishing harbour's crew member whose trawler is out (server sim/harbours.ts): "at sea on the Kittiwake" */
   atSea?: { boat: number; name: string };
   /**
@@ -684,6 +689,8 @@ export type ServerMsg =
   /** flat quads: id, x, y, flags (see packCitizenFlags) */
   | { t: 'citizens'; c: number[] }
   | { t: 'stats'; day: number; dayFrac: number; population: number; jobs: number; employed: number; moving: number; driving: number; sites: number; outAndAbout: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; /** server tick time over the last minute, ms (sim + flush); absent from older servers */ tickAvg?: number; tickP95?: number; tickMax?: number; /** newcomers in and leavers out through gateways today (absent from older servers) */ migIn?: number; migOut?: number; /** newcomers queued at the gates */ migWaiting?: number; /** game ticks per TICK_MS of wall time for the client's clock: 0 paused, 2 or 4 fast-forward (local mode, docs/local-mode.md); absent means 1 */ rate?: number }
+  /** leisure places with someone there right now, flat [x, y, guests, ...] by door tile (docs/leisure.md section 9: the client's moving parts follow the crowd); with the stats when it changes, and every ten seconds */
+  | { t: 'venues'; v: number[] }
   | { t: 'building'; x: number; y: number; info: BuildingInfo | null }
   | { t: 'road'; x: number; y: number; info: RoadInfo | null }
   | { t: 'citizen'; id: number; info: CitizenInfo | null }

@@ -5,6 +5,7 @@ import { HELPERS } from './helpers';
 import { MAX_KIND_CODE, MAX_LEVEL_CODE, MAX_FOOTPRINT, MAX_KIND_ID, FIRST_SUB_KIND_ID, LANDMARK_DRAFT_IDS } from './codes';
 import { techFor } from '../tech';
 import { GROUP_BY_ID } from './groups';
+import { VENUE_TYPES, UNSTAFFED_VENUES } from '../venueTypes';
 
 const FAMILIES = ['residential', 'commercial', 'industrial', 'office', 'civic', 'transport', 'leisure', 'utility'];
 const FLAG_NAMES = ['growable', 'civic', 'service', 'workplace', 'parking', 'leisureReady'];
@@ -23,15 +24,14 @@ const REQUIRED_ATTRS: Record<string, Record<string, 'number' | 'string' | 'hours
   residential: { style: 'string', rentBand: 'string' },
   leisure: { venueType: 'string', leisureValue: 'number', radius: 'number', visitorCapacity: 'number', openHours: 'hours', ticket: 'number', stay: 'hours' },
 };
-/** Venue types the simulation knows how to describe and schedule (shared/src/leisure.ts). */
-export const VENUE_TYPES = ['park', 'cinema', 'theatre', 'sports', 'library'];
 /** Leisure rules beyond presence and type: sane ranges, event nights as weekdays, parks unstaffed and venues staffed. */
 function checkLeisure(k: KindDef, a: Attributes, where: string, errs: string[]) {
   const bad = (m: string) => errs.push(`${where}: ${m}`);
-  if (typeof a.venueType === 'string' && !VENUE_TYPES.includes(a.venueType)) bad(`venueType '${a.venueType}' unknown (${VENUE_TYPES.join(', ')})`);
-  const park = a.venueType === 'park';
-  if (park && k.flags?.workplace) bad('a park has no staff: drop the workplace flag');
-  if (!park && !k.flags?.workplace) bad('a staffed venue needs the workplace flag and an occupation');
+  if (typeof a.venueType === 'string' && !(VENUE_TYPES as readonly string[]).includes(a.venueType)) bad(`venueType '${a.venueType}' unknown (${VENUE_TYPES.join(', ')})`);
+  const free = (UNSTAFFED_VENUES as readonly string[]).includes(String(a.venueType));
+  // a park has no staff; the playground, skate park and allotments may go either way (attractions.ts leaves them unstaffed)
+  if (a.venueType === 'park' && k.flags?.workplace) bad('a park has no staff: drop the workplace flag');
+  if (!free && !k.flags?.workplace) bad('a staffed venue needs the workplace flag and an occupation');
   if (isNum(a.visitorCapacity) && (!Number.isInteger(a.visitorCapacity) || a.visitorCapacity < 1 || a.visitorCapacity > 500)) bad('visitorCapacity must be an integer 1-500');
   if (isNum(a.leisureValue) && (a.leisureValue < 0 || a.leisureValue > 12)) bad('leisureValue must be 0-12');
   if (isNum(a.radius) && (a.radius < 0 || a.radius > 40)) bad('radius must be 0-40 tiles');
@@ -42,7 +42,8 @@ function checkLeisure(k: KindDef, a: Attributes, where: string, errs: string[]) 
   if (a.eventNights !== undefined) {
     const ev = a.eventNights;
     if (!Array.isArray(ev) || ev.some((d) => !Number.isInteger(d) || d < 0 || d > 6) || new Set(ev).size !== ev.length) bad('eventNights must be distinct weekdays 0-6 (0 = Monday)');
-    else if (ev.length && !(isNum(a.eventStart) && a.eventStart >= 12 && a.eventStart <= 23)) bad('event nights need an eventStart hour 12-23');
+    // morning events too: a fishing match at 8, the dawn chorus walk at first light, a farm's open day at 11
+    else if (ev.length && !(isNum(a.eventStart) && a.eventStart >= 5 && a.eventStart <= 23)) bad('event days need an eventStart hour 5-23');
   }
   for (const f of ['dayAppeal', 'eveningAppeal', 'retireeAppeal', 'childAppeal', 'upgradeVisits', 'trees', 'benches', 'eventSize'] as const) {
     if (a[f] !== undefined && !(isNum(a[f]) && (a[f] as number) >= 0)) bad(`${f} must be a non-negative number`);
