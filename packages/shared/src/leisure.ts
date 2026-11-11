@@ -35,6 +35,11 @@ export interface LeisureSpec {
   eventSize: number;
   /** a block's communal garden (attribute blockOnly): only the homes round its own block count it, and nobody travels to it */
   blockOnly: boolean;
+  /**
+   * how much of a visit is out of doors, 0-1 (attribute `outdoor`; default 1 for a park, 0 for the rest): the weather's
+   * pull on it (docs/weather.md W4, shared weatherfx.ts leisureMul): rain, cold and the dark keep people out, warm dry days bring them
+   */
+  outdoor: number;
 }
 
 const num = (a: Attributes, k: string, d: number) => (typeof a[k] === 'number' ? (a[k] as number) : d);
@@ -53,6 +58,7 @@ function specOf(kind: number, level: number, design: number, name: string, workp
     staffed: workplace, upgradeVisits: num(a, 'upgradeVisits', 0),
     paths: typeof a.paths === 'string' ? a.paths : '', trees: num(a, 'trees', 0), benches: num(a, 'benches', 0),
     eventSize: num(a, 'eventSize', 1), blockOnly: a.blockOnly === true,
+    outdoor: Math.max(0, Math.min(1, num(a, 'outdoor', String(a.venueType) === 'park' ? 1 : 0))),
   };
 }
 

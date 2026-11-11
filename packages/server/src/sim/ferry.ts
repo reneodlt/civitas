@@ -9,6 +9,7 @@ import type { Transit, LineRoute } from './transit';
 import { Timetabled, trainVehicleId, type TimetabledLine } from './timetabled';
 import { lapOf } from './rail';
 import { ageOf } from './life';
+import { weatherNow, type WeatherHold } from './weatherfx';
 
 /** rows of a boat's roster */
 const ROSTER_CAP = 200;
@@ -164,6 +165,31 @@ export class Ferry extends Timetabled {
     return p ? pontoonSpot(p, citizenId) : null;
   }
   protected capacity(svc: RailService) { return svc.vehicles * FERRY.riders; }
+
+  // ---- the weather (docs/weather.md W4) -------------------------------------------------------------
+
+  /** set by game.ts: sailings held or resumed, for the news (sim/news.ts weather) */
+  onHold: ((e: WeatherHold) => void) | null = null;
+  private holding: 'storm' | 'fog' | null = null;
+  /** counters since start: holds, ticks held */
+  weatherStats = { holds: 0, heldTicks: 0 };
+  /** Storm or thick fog: the boats keep their timetable (the clients draw it) but take no one on, and the planner sends nobody by river bus. */
+  protected heldWhy(): string | null {
+    const h = this.byId.size ? weatherNow(this.w).hold : null;
+    return h ? (h === 'storm' ? 'sailings held: storm' : 'sailings held: thick fog') : null;
+  }
+  tick() {
+    const h = this.byId.size ? weatherNow(this.w).hold : null;
+    if (h) this.weatherStats.heldTicks++;
+    if (h !== this.holding) {
+      const was = this.holding;
+      this.holding = h;
+      const first = [...this.byId.values()].find((l) => l.svc)?.def.stations[0];
+      if (h) this.weatherStats.holds++;
+      if (first) this.onHold?.({ what: 'river buses', reason: h ?? was!, lifted: !h, x: first[0], y: first[1], owner: this.w.parcelAt(first[0], first[1])?.owner });
+    }
+    super.tick();
+  }
 
   /** The lines on the wire ('ferryLines'): rail's form, with the piers' names. */
   dtos(): FerryLineDTO[] {

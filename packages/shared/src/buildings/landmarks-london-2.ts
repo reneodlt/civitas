@@ -301,7 +301,7 @@ export const londonEye: KindDef = {
   attrs: {
     ...sports.attrs, venueType: 'sports', openHours: [10, 23], visitorCapacity: 160, ticket: 18, stay: [0.8, 1.4],
     leisureValue: 10, radius: 34, eventNights: [], dayAppeal: 1.2, eveningAppeal: 1.3, retireeAppeal: 0.9, childAppeal: 1.9,
-    title: 'London Eye',
+    title: 'London Eye', outdoor: 0.5,
   },
   lot: { wage: 16 },
   levels: [{

@@ -50,6 +50,7 @@ export * from './boats';
 export * from './ferry';
 export * from './education';
 export * from './weather';
+export * from './weatherfx';
 export * from './value';
 export * from './refuse';
 export * from './policies';

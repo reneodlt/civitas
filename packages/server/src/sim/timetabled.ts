@@ -62,6 +62,8 @@ export abstract class Timetabled implements ModeService {
   /** Places on one of the line's trains. */
   protected abstract capacity(svc: RailService): number;
   abstract stopProblem(x: number, y: number): string | null;
+  /** Why no one may board now (a ferry held by storm or fog, docs/weather.md W4), or null: riders still get off, none get on, the planner skips the mode. */
+  protected heldWhy(): string | null { return null; }
   abstract route(line: TransitLine): LineRoute | string;
 
   // ---- lines -------------------------------------------------------------------------------------
@@ -144,6 +146,7 @@ export abstract class Timetabled implements ModeService {
   waitAt(line: TransitLine, call: number): number | null {
     const rl = this.byId.get(line.id);
     if (!rl?.svc || rl.svc.freight) return null; // freight trains take no passengers: the planner skips them
+    if (this.heldWhy()) return null;
     const svc = rl.svc, pi = this.pieceOfCall(svc, call);
     if (pi < 0) return null;
     const now = this.railTick, p = svc.pieces[pi];
@@ -174,6 +177,8 @@ export abstract class Timetabled implements ModeService {
     const rl = this.byId.get(line.id);
     if (!rl) return 'not routed yet';
     if (!rl.svc) return rl.status;
+    const held = this.heldWhy();
+    if (held) return held;
     if (!this.inService(line)) {
       const h = (this.railTick % TICKS_PER_DAY) / TICKS_PER_HOUR;
       return h < SERVICE_START_HOUR && h >= SERVICE_END_HOUR - 24 ? 'outside service hours (05:00–01:00)' : 'between trains';
@@ -218,7 +223,7 @@ export abstract class Timetabled implements ModeService {
   /** A train at a station: hand over to the registry (riders off, riders on). `arrival` false: a later tick of the same dwell. */
   protected serve(rl: TimetabledLine, train: number, stop: number, dir: 1 | -1, arrival = true) {
     const vid = trainVehicleId(rl.line.id, train);
-    const room = this.capacity(rl.svc!) - this.transit.load(vid);
+    const room = this.heldWhy() ? 0 : this.capacity(rl.svc!) - this.transit.load(vid);
     if (!arrival && room <= 0) return;
     const { off, on } = this.transit.serveCall(vid, rl.line.id, this.callOf(rl, stop, dir), room, true);
     if (!arrival && !on && !off) return;

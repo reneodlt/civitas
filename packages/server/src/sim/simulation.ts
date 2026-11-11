@@ -51,6 +51,8 @@ import { Learning, ERRAND_CLASS } from './learning';
 import { Death, ERRAND_FUNERAL } from './death';
 import { Motivation, MOTIVATION, inheritValues, essentialJob, type MotiveHost } from './motivation';
 import { ValueField } from './value';
+import { weatherNow, moodNow, driveMinFor } from './weatherfx';
+import { leisureMul } from '@msimcity/shared';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -612,7 +614,7 @@ export class Simulation {
     for (const id of c.friends) { const o = w.citizens.get(id); if (o) friends.push(ref(o, 'friend')); }
     let colleagues = 0;
     if (c.job) for (const o of w.citizens.values()) if (o.job && o !== c && o.wx === c.wx && o.wy === c.wy) colleagues++;
-    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) });
+    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c), weather: moodNow(this.w) });
     const wk = week(c, tick);
     const fresh = c.statsDay === day;
     let care: string | undefined;
@@ -905,7 +907,7 @@ export class Simulation {
 
   /** A citizen's happiness parts as the daily update reads them now (sim/issues.ts asks why a very unhappy home is). */
   moodParts(c: Citizen) {
-    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) });
+    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c), weather: moodNow(this.w) });
   }
   /**
    * Service coverage of a tile: for each service family (police, fire, health) the strongest staffed station whose
@@ -1595,6 +1597,7 @@ export class Simulation {
     const h = this.hour, evening = h >= 17;
     const fx = Math.floor(c.x), fy = Math.floor(c.y);
     const needMul = 0.7 + 0.8 * leisureNeed(c);
+    const wx = weatherNow(w); // the weather's pull on outdoor and indoor places (docs/weather.md W4)
     let best: Building | null = null;
     let bestScore = freeOnly ? 0.15 : BAR_YARDSTICK * (0.6 + 0.8 * Math.random()) * this.motive.yardstick(c);
     w.eachBuiltNear(fx, fy, LEISURE_CODES, freeOnly ? CHILD_TRIP_MAX : LEISURE_TRIP_MAX, (b, d) => {
@@ -1609,7 +1612,8 @@ export class Simulation {
       const taste = 0.35 + 1.3 * hash2(c.id, 301 + VENUE_TYPE_INDEX[sp.type]);
       const pull = this.eventNow(sp, b) ? EVENT_PULL * sp.eventSize : 1; // bigger venues, bigger nights
       const score = ((evening ? sp.evening : sp.day) * stage * taste * pull * (0.5 + sp.value / 8) * needMul * (0.6 + 0.8 * Math.random())) / (1 + d / 12)
-        * (MOTIVATION.on && MOTIVATION.leisure ? this.motive.leisure(c, d, sp.ticket, pull > 1) : 1); // Adventure goes further and loves an event, Money minds the ticket
+        * (MOTIVATION.on && MOTIVATION.leisure ? this.motive.leisure(c, d, sp.ticket, pull > 1) : 1) // Adventure goes further and loves an event, Money minds the ticket
+        * leisureMul(wx.w, sp.outdoor, evening, wx.dark);
       if (score > bestScore) { bestScore = score; best = b; }
     });
     return best;
@@ -1812,7 +1816,7 @@ export class Simulation {
     // the leisure need drains a little every day; parks near home give some of it back
     const lc = this.leisureCoverage(c.hx, c.hy);
     leisureDay(c, lc.parks);
-    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) }));
+    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c), weather: moodNow(this.w) }));
     c.trafficTicksLife = 0;
   }
 
@@ -2325,7 +2329,7 @@ export class Simulation {
     const s = c.site ? w.sites.get(c.site) : undefined;
     if (!s) { c.site = null; this.nextSiteOrYard(c); return; }
     if (s.priority <= -2) { w.leaveSite(c); this.nextSiteOrYard(c); return; } // paused: down tools
-    const rate = BUILD_RATE * WORK_RATE_OF[c.kind]; // the crew's pace comes from their workplace's tier (a construction company works faster)
+    const rate = BUILD_RATE * WORK_RATE_OF[c.kind] * weatherNow(w).build; // the crew's pace comes from their workplace's tier (a construction company works faster); frost and heavy rain slow it (docs/weather.md W4)
     s.work -= rate;
     const q = Math.min(3, Math.floor((4 * (s.total - s.work)) / s.total));
     const t = w.getTile(s.x, s.y);
@@ -2369,7 +2373,7 @@ export class Simulation {
     const carPos: [number, number] = c.parkedAt ? parseKey(c.parkedAt) : [c.hx, c.hy];
     const carHere = carPos[0] === hx && carPos[1] === hy;
     const carDist = Math.abs(carPos[0] - hx) + Math.abs(carPos[1] - hy);
-    const far = Math.abs(dx - hx) + Math.abs(dy - hy) >= DRIVE_MIN_TILES;
+    const far = Math.abs(dx - hx) + Math.abs(dy - hy) >= driveMinFor(w, c.id); // in the wet, some drive shorter trips too (docs/weather.md W4)
     let useCar = c.car && (goingHome ? c.parkedAt !== null : carDist <= CAR_FETCH_RADIUS && far);
     const legs: Leg[] = [];
     let carTicks = Infinity;
@@ -2431,7 +2435,7 @@ export class Simulation {
     const taste = TRANSIT.tasteMin + TRANSIT.tasteSpan * hash2(c.id, 77);    // how much this person minds the bus
     const carTaste = 0.85 + 0.6 * hash2(c.id, 78);                          // and how much they mind driving and parking
     const byTransit = p.perceived * taste * (walkSpeed < WALK_SPEED ? 0.9 : 1) + p.fare * fare * TRANSIT.ticksPerDollar;
-    const byFoot = walkCost((dist * 1.2) / walkSpeed);
+    const byFoot = walkCost((dist * 1.2) / walkSpeed) * weatherNow(this.w).walk; // rain, snow and cold make the walk worse (docs/weather.md W4)
     if (byTransit >= byFoot || byTransit >= carTicks * carTaste) return null;
     return this.transit.legsFor(p, hx, hy, dx, dy);
   }

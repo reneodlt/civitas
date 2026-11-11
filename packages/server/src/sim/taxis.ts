@@ -6,6 +6,7 @@ import type { Citizen, Leg, World } from '../world';
 import { tkey } from '../world';
 import { pathBetween } from '../pathfinding';
 import { noteIncome, noteSpend, ageOf, LIFE } from './life';
+import { weatherNow } from './weatherfx';
 import type { Mobile, Unit, Stop, FleetService, FleetInfoRows } from './mobile';
 
 const DAY = TICKS_PER_DAY;
@@ -113,7 +114,7 @@ export class Taxis implements FleetService {
     const walkSpeed = c.stage === LifeStage.Retired ? WALK_SPEED * LIFE.retireeWalk : WALK_SPEED;
     const taste = TAXI.priceTasteMin + TAXI.priceTasteSpan * hash2(c.id, 441);
     const byTaxi = q.fare * TRANSIT.ticksPerDollar * taste + TRANSIT.waitWeight * q.wait + q.ride;
-    const byFoot = walkCost((dist * 1.2) / walkSpeed) * (night ? TAXI.nightWalk : 1);
+    const byFoot = walkCost((dist * 1.2) / walkSpeed) * (night ? TAXI.nightWalk : 1) * weatherNow(this.w).walk; // a wet walk (docs/weather.md W4)
     const byCar = carTicks * (0.85 + 0.6 * hash2(c.id, 78)) * (nightOut ? TAXI.outingCar : 1);
     if (byTaxi >= byFoot || byTaxi >= byCar) return null;
     const leg = this.book(c, q, fx, fy, dx, dy);

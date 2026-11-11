@@ -254,3 +254,83 @@ about 60 tiles, the ground fades to the sky colour, the sun veiled; `clear`: unc
 type-checked only). Trees stay green in snow (W5). No lightning flash (thunder only). No puddles. The void beyond the world's edge draws
 black (as before) rather than fogged; with fog the world's own ground fades correctly. Precipitation is camera-local in both cameras, so the
 first-person inset shows its own volume, not the overhead one's.
+
+## Built: W4 (2026-11-11)
+
+The weather now changes the simulation. Server and shared only (no client change, no save change; the wire gains a story kind,
+`weather`): `shared/src/weatherfx.ts` (new: the effects as pure functions of a `Weather`), `WEATHER_TUNING` in `shared/src/tuning.ts`,
+`server/src/sim/weatherfx.ts` (new: `weatherNow(world)`, the effects for the world's tick, memoised per tick), and small additive
+edits to `sim/simulation.ts` (mode choice, leisure scoring, site work, the mood input), `sim/traffic.ts` (road pace), `sim/taxis.ts`,
+`sim/utilities.ts`, `shared/src/utilities.ts` (the `UTIL_WEATHER` hooks, `UtilityField.served`), `sim/airports.ts`, `sim/timetabled.ts` and
+`sim/ferry.ts`, `sim/harbours.ts`, `sim/news.ts` and `game.ts` (the hold story), `sim/life.ts` (`HappyInputs.weather`), `shared/src/leisure.ts`
+(`LeisureSpec.outdoor`, catalogue attribute `outdoor`), `shared/src/weather.ts` (`meanWindOf`) and three catalogue entries.
+
+**One read.** Everything goes through `weatherFor(World.seed, tick)`: W1's `weatherAt`, or a forced condition. `weatherNow(world)` computes the
+walk multiplier, road pace, collision factor, darkness, site-work factor and hold once per tick; the utilities solve, the mood and the
+`UTIL_WEATHER` hooks read `weatherFor` directly. All of it is a pure function of the seed and the tick (no Math.random in the new code; the
+personal "takes the car in the rain" draw is `hash2(id, 79)`), so a replay repeats: `weathersim:check` runs the same seed twice in the rain
+and compares trips, visits, speed and every citizen's position.
+
+**Forced weather for tests.** `WEATHER=rain|snow|fog|storm|clear|warm` in the server's environment (read once through `env.ts`, so local mode
+never sees it) or `setForcedWeather(...)` in-process forces that condition at every tick, with the values of the client's `?weather=` (rain 0.7
+at 9 C; snow -2 C with 0.95 lying; fog 0.85 at 6 C; storm: rain 1, gusts 48; clear 16 C; `warm`, server only: a sunny 24 C). Not sent to
+clients: a client shows its own `?weather=` or the real weather. Never set it on a live server.
+
+**What it does** (numbers are `WEATHER_TUNING` defaults):
+
+| Area | Effect | Where |
+| --- | --- | --- |
+| Mode choice | the walk's perceived cost × (1 + 1.2 rain), × (1 + 1.5 intensity) in falling snow, + 0.6 × lying snow, + 0.04 a degree under 6 C (at most 0.5); the transit and taxi choices weigh it. Car owners: a hashed share, 0.5 × (walk cost − 1), also drive trips of 2-3 tiles (`DRIVE_MIN_TILES` 4 otherwise). There is no cycling mode in the game, so walking takes the whole effect | `Simulation.plan`, `transitChoice`, `Taxis.choose` |
+| Road speed | pace × 0.9 in rain (from intensity 0.15, full at 0.7), × 0.75 on full lying snow where `ROAD_WEATHER.gritted(x, y)` is false (always, until W6's gritters), × 0.9 in thick fog; in the leg and in a fast car's look-ahead | `Traffic.weatherPace` |
+| Collisions | `collisionMul(w)`: 1 + 0.5 rain + 1.5 snow + 0.8 thick fog. A hook: the incident system has no road collisions yet | `shared/weatherfx.ts` |
+| Leisure | a place's outdoor share (`outdoor`: parks 1, botanical garden 0.6, open-air lido 0.8, London Eye 0.5, the rest 0) scores × (1 − 0.75 rain) × (1 − 0.05 a degree under 10 C, at most 0.6) × (1 − 0.35 dark), and up to × 1.35 on a warm (18 C+) dry clear day; the indoor share × (1 + 0.4 rain) in the evening | `Simulation.pickLeisure` |
+| Utilities | demand × (1 + 1.2% a degree under 14 C, at most +30%) and (+2.5% a degree over 22 C, at most +30%); street lighting 0.02 u/h per served road tile in the dark; turbines × the wind against the world's mean (at most 1.5, 0 when gusts pass 40 tiles/h); storm faults ×3 overhead, ×2 nodes and buried. `gasDemandMul` is the hook for a gas network | `Utilities.solve`, `UTIL_WEATHER` |
+| Mood | + up to 3 "a sunny day" (sun up, cloud under 0.4, dry, 15 C+; the full lift at 19 C); − up to 3 "a grey spell" / "days of grey, wet weather" when more than 75% of the last 72 game hours (sampled every 3) were grey (cloud over 0.8, rain over 0.15 or fog over 0.5). Pure in seed and hour, memoised | `weatherMood`, `happinessParts` |
+| Transport | while a storm blows or fog is over 0.6: landings are held and land late when it lifts (diverted after 4 game hours); river buses keep their timetable but take nobody on and the planner skips them (status "sailings held: thick fog"); harbour events (catches, calls, cast-offs) wait and happen when it lifts. One news story per hold ("Fog grounds flights at ...", "River buses tied up in the storm at ...", "Ships wait out the fog off ..."), its headline changed when it lifts ("Flights land again at ... after the fog") | `Airports`, `Ferry.heldWhy`, `Harbours`, `News.weather` |
+| Construction | site work × 0.7 in frost (0 C or lying snow over 0.3), × 0.8 in rain over 0.75 | `Simulation.workSite` |
+
+**How often, real weather** (6 years of hours, five seeds): the walk costs over 1.3× in 28-59% of hours (dry worlds to wet; W1's wettest
+worlds rain 55-60% of the time), roads are slowed in 30-59% (mean pace 0.93-0.98), sunny mood 1-12% of hours and grey 13-67%, site work
+slowed 18-46%, flights and boats held 2-4%, turbines feathered 0-5%.
+
+**Measured.** `ab.ts --hour 8 --ticks 1500 --set bus=2` (1×1 Commons built 3, two bus lines, seed 1; Math.random seeded). The pre-change commit,
+the real weather of that morning, `clear` and `warm` give identical numbers (nothing changes on a mild dry day): planned walk 441, drive 348,
+transit 6, 38 taxis; vehicle speed 37.5% of free flow. Under forced weather (runs vary a few percent with the mood's knock-on effects):
+
+| | walk | drive | transit | taxis | walk share | speed |
+| --- | --- | --- | --- | --- | --- | --- |
+| dry (base) | 441 | 348 | 6 | 38 | 55% | 37.5% |
+| rain | 298-327 | 447-453 | 14-16 | 47 | 39-41% | 31-33% |
+| snow | 238-253 | 485-503 | 21-25 | 53-63 | 31-32% | 30% |
+| storm | 290-315 | 418-443 | 13-24 | 38-52 | 38-41% | 33-34% |
+| fog (6 C) | 416 | 376 | 1 | 36 | 52% | 31% |
+
+`loadtest/leisure.ts --days 2` (a park, a cinema and a library in the 1×1 Commons; unseeded, about ±10%), arrivals at bars / cinema / library /
+park and mean happiness: pre-change 768 / 111 / 51 / 105, 54.4; `clear` 727 / 101 / 49 / 82, 56.2 (fewer evening park visits after dark, and
+the sunny lift); `warm` 770 / 108 / 42 / 90, 56.0; `rain` 753 / 104 / 51 / 35, 50.1; `snow` 733 / 103 / 44 / 13, 49.6; the real weather of seed 1's
+days 2-3 (wet and cool) 781 / 108 / 50 / 60, 53.2. Parks lose most; the cinema did not gain in absolute terms (its evening slots were already
+nearly full), so the indoor share of outings rises rather than the count.
+
+`weathersim:check` (a 1×1 city, seeded, half a day from 08:00 on day 2): walk share 52% clear, 41% rain, 33% snow; speed 25.1%, 24.2%, 22.7%
+(that city is congested, so the pace change shows less than in ab.ts); park visits 35, 22, 11; happiness 54.1, 49.3, 49.8. Utilities, 4
+substations over 197 road tiles: noon demand 403.5 clear, 481.0 at -2 C (×1.19), 423.7 at 24 C (×1.05); 23:00 demand 270.9 of which 3.9 is
+street lighting (1.4%), 322.1 in snow.
+
+Transport: `loadtest/ferry.ts` (two river bus lines across a lake) carries 22 riders over its day in the real weather; with `WEATHER=fog` all day
+both lines say "sailings held: thick fog" and carry none (that loadtest's own "riders board" lines then fail, as they should).
+
+**Cost.** `ab.ts` sim ms a tick, the pre-change commit against this one on the same machine, three alternating runs: 1.21 / 0.96 / 1.00 against
+1.02 / 1.04 / 1.07, within the noise. `perf:check` is unreliable on this machine and was not used. The motivation loadtest: 1.14-1.16 ms a tick
+both ways.
+
+**Judgement calls and not done.**
+- No cycling mode exists, so "walking and cycling" is walking; the shift goes to cars (owners), taxis and the bus.
+- Collisions are a hook (`collisionMul`), since the incident system has no road collisions.
+- Holds are server-side: clients still draw planes landing and boats sailing to the timetable during a hold (they could read
+  `holdReason(weatherAt(...))` themselves; left for W6's warnings). A held landing's passengers arrive late; a diverted one's never.
+- Heating gas is a hook (`gasDemandMul`): there is no gas network. The electric share of heating and cooling goes on power demand. Nobody is
+  billed for street lighting: the network's owner pays for its units.
+- `windAt` (the turbines and the client's rotors) is now the hashed local gust signal × the weather's wind against the world's mean, capped at
+  1; a windy world's turbines average a little more than before, a calm one's a little less.
+- Forced weather is per process (`WEATHER`), not per world or GameConfig, to keep net.ts untouched while M5 and M7 work there.
+- Hooks left for W5 and W6: `ROAD_WEATHER.gritted`, `collisionMul`, `gasDemandMul`, `faultMulOf` (storms ×3 now, W6 ×10), `holdReason`.

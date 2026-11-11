@@ -188,6 +188,8 @@ export interface HappyInputs {
   coverage: number; tick: number; parks?: number; kids?: { school: number; meals: boolean };
   /** motivation (sim/motivation.ts bend): a multiplier per value (Value order) for the parts that value cares about; 1 for all when absent */
   bend?: readonly number[];
+  /** the weather's part (shared weatherMood, docs/weather.md W4): a sunny warm day, a grey spell; absent or null for neither */
+  weather?: { label: string; delta: number } | null;
 }
 /** Value indices (shared/src/motivation.ts Value) the parts of happiness belong to */
 const MONEY = 0, FAMILY = 1, STATUS = 2, ROOTS = 3, TIME = 4, ADVENTURE = 5;
@@ -231,6 +233,7 @@ export function happinessParts(c: Citizen, h: HappyInputs): { label: string; del
   if (trafficMin > 20) add('stuck in traffic', -Math.min(6, trafficMin / 10), TIME);
   const mood = MOODS.get(c)?.(h.tick); // grief (sim/death.ts): a family value
   if (mood) add(mood.label, mood.delta, FAMILY);
+  if (h.weather) add(h.weather.label, h.weather.delta);
   parts.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   return parts;
 }

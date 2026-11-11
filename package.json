@@ -27,6 +27,7 @@
     "crossing:check": "tsx packages/server/src/crossing-check.ts",
     "auth:check": "tsx packages/server/src/auth-check.ts",
     "weather:check": "tsx packages/server/src/weather-check.ts",
+    "weathersim:check": "tsx packages/server/src/weathersim-check.ts",
     "roadrules:check": "tsx packages/server/src/roadrules-check.ts",
     "value:check": "tsx packages/server/src/value-check.ts",
     "land:check": "tsx packages/server/src/land-check.ts",

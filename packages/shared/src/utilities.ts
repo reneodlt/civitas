@@ -6,6 +6,8 @@ import { Zone } from './buildings/codes';
 import { hash2 } from './noise';
 import { structureAt, isMultiTile } from './structures';
 import { MOTORWAY_KIND } from './gateways';
+import { weatherFor, faultMulOf, windOutputMul } from './weatherfx';
+import { meanWindOf } from './weather';
 
 /**
  * Utilities (docs/utilities.md): the hybrid networks. Plants generate, nodes pass power on along the streets, trunk
@@ -83,12 +85,15 @@ export function faultAdvice(o: { crew?: 'coming' | 'working'; depot: boolean; te
     : `${c}. A power depot of your own would send a repair van in ${van}: it needs ${o.techName} (T).`;
 }
 
-/** Storms (docs/utilities.md section 4.4): there is no weather system yet. Both are 1; a weather card fills them in. */
+/**
+ * The weather's hooks (docs/utilities.md section 4.4, docs/weather.md W4; shared/src/weatherfx.ts): read the world's
+ * weather (`weatherFor`, so a forced test condition applies) on the server and every client alike.
+ */
 export const UTIL_WEATHER = {
-  /** multiplies the fault rate at (x, y): a storm raises overhead faults about 10× for a few hours */
-  faultMul: (_x: number, _y: number, _tick: number, _overhead: boolean) => 1,
-  /** multiplies wind output: 0 at gale force (the turbines feather) */
-  windMul: (_tick: number) => 1,
+  /** multiplies the fault rate at (x, y): a storm raises overhead faults WEATHER_TUNING.faultStorm×, the rest half as much (W6: the big storms) */
+  faultMul: (_x: number, _y: number, tick: number, overhead: boolean, seed: number) => faultMulOf(weatherFor(seed, tick), overhead),
+  /** multiplies wind output: the wind's speed against the world's mean wind (up to 1.5×), 0 at gale force (the turbines feather) */
+  windMul: (tick: number, seed: number) => windOutputMul(weatherFor(seed, tick), meanWindOf(seed)),
 };
 
 // ---------------------------------------------------------------- kinds
@@ -146,14 +151,15 @@ export function powerDemand(family: number, level: number, occupants: number, ca
 /** The sun's elevation for the hour, as the sky draws it (render/lighting.ts, materials.ts mscSky): 0 at night, 1 at noon. */
 export const daylight = (hour: number) => Math.max(0, Math.sin((hour / 24) * Math.PI * 2 - Math.PI / 2));
 /**
- * The wind, 0.15-1: a slow signal hashed from the world seed, eased between values every six game hours, so turbines
- * have calm spells and windy ones the same way on every run.
+ * The wind at the turbines, 0-1: a slow signal hashed from the world seed (0.15-1, eased between values every six game
+ * hours: local gustiness) times the weather's wind (UTIL_WEATHER.windMul: up to 1.5 in a strong wind, 0 in a gale),
+ * capped at 1, the same on every run and every machine.
  */
 export function windAt(tick: number, seed: number): number {
   const span = 6 * TICKS_PER_HOUR, i = Math.floor(tick / span), f = (tick - i * span) / span;
   const a = hash2(i * 7 + 3, seed * 13 + 1), b = hash2((i + 1) * 7 + 3, seed * 13 + 1);
   const e = f * f * (3 - 2 * f);
-  return Math.max(0, (0.15 + 0.85 * (a + (b - a) * e)) * UTIL_WEATHER.windMul(tick));
+  return Math.max(0, Math.min(1, (0.15 + 0.85 * (a + (b - a) * e)) * UTIL_WEATHER.windMul(tick, seed)));
 }
 /** A plant's availability now (1 for steady plants). */
 export function availability(kind: number, tick: number, seed: number): number {
@@ -250,6 +256,8 @@ export class UtilityField {
   private byKey = new Map<number, number>();
   /** road tiles reached, over all nodes (the probe and the bench read it) */
   reached = 0;
+  /** road tiles each node serves (the nearest node takes a tile two reach): its street lighting (docs/weather.md W4) */
+  served: Int32Array = new Int32Array(0);
 
   /** Recompute from these nodes (any order) over env's tiles. */
   rebuild(nodes: readonly UtilNode[], env: UtilEnv) {
@@ -272,6 +280,8 @@ export class UtilityField {
       }
     }
     this.adjacent = adj;
+    this.served = new Int32Array(this.nodes.length);
+    for (const c of this.cells.values()) for (let li = 0; li < c.node.length; li++) if (c.node[li] >= 0) this.served[c.node[li]]++;
   }
   private cell(owner: string, cx: number, cy: number, make = false): FieldCell | undefined {
     const k = `${owner}|${chunkKey(cx, cy)}`;

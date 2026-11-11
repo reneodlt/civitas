@@ -7,6 +7,7 @@ import type { World, Site, Building } from '../world';
 import type { FireStoryEvent } from './fires';
 import type { RankStoryEvent } from '../ranks';
 import type { DeathStoryEvent } from './death';
+import type { WeatherHold } from './weatherfx';
 
 /** A story as the log keeps it: the DTO and the key of what it is about (a fire's id), so a later event finds it. */
 interface Story extends StoryDTO { ref?: string }
@@ -196,6 +197,27 @@ export class News {
       : l.mode === 'rail' ? `rail line ${l.number}` : l.mode === 'ferry' ? (l.name ? `the ${l.name} river bus` : `river bus ${l.number}`) : `bus route ${l.number}`;
     const place = this.placeName(at.x, at.y);
     this.add('line', at.x, at.y, (id) => headline('line', id, { what: what[0].toUpperCase() + what.slice(1), place }), l.mode === 'metro' ? 55 : l.mode === 'bus' ? 30 : 45, { who: l.owner });
+  }
+
+  /**
+   * The weather held flights, river buses or shipping (docs/weather.md W4: Airports, Ferry, Harbours onHold), or let them
+   * go again: one story per hold, live until it lifts (NEWS.liveHours.weather at most), its headline then saying so.
+   */
+  weather(e: WeatherHold) {
+    const ref = `weather|${e.what}`, now = this.w.tick;
+    const place = this.placeName(e.x, e.y), cause = e.reason === 'storm' ? 'the storm' : 'the fog';
+    if (!e.lifted) {
+      const h = e.what === 'flights' ? (e.reason === 'storm' ? `Storm holds flights at ${place}` : `Fog grounds flights at ${place}`)
+        : e.what === 'river buses' ? `River buses tied up in ${cause} at ${place}` : `Ships wait out ${cause} off ${place}`;
+      this.add('weather', e.x, e.y, () => h, e.what === 'flights' ? 40 : 30, e.owner ? { who: e.owner } : {}, ref);
+      return;
+    }
+    const st = this.byRef.get(ref);
+    this.byRef.delete(ref);
+    if (!st || (st.end !== undefined && st.end <= now)) return;
+    st.h = e.what === 'flights' ? `Flights land again at ${place} after ${cause}` : e.what === 'river buses' ? `River buses sail again after ${cause}` : `Ships come in to ${place} after ${cause}`;
+    st.end = now + TICKS_PER_HOUR;
+    this.touch(st);
   }
 
   // ---- the log -----------------------------------------------------------------------------------
