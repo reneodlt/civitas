@@ -70,12 +70,14 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other'
+  /** M4 (docs/multiplayer-land.md section 5): the landfill levy a refuse site pays, and what a cleaner grade sells (materials, gas, power) */
+  | 'levy' | 'recycling';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
   adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
-  grant: 'Charter grants and rewards', other: 'Other',
+  grant: 'Charter grants and rewards', other: 'Other', levy: 'Landfill levy', recycling: 'Recycling, gas and power sales',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -86,7 +88,8 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  * Running: taxes; fares and fees (transit, taxis, parking, couriers, freight, port dues, school fees, refuse); staff
  * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); public roads (the upkeep of
  * road the player laid on unclaimed land, server/src/sim/publicroads.ts); utility bills and fuel or
- * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot).
+ * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot); the landfill
+ * levy and recycling, gas and power sales (a refuse site's, per home emptied: docs/multiplayer-land.md M4).
  * One-off: construction (buildings, zoning, roads, junctions, rail, metro, lines and cables, with demolition refunds);
  * builders' fees (a yard's charge for the building it does); land (bought, or sold back); technology; advert
  * campaigns (the artwork); fire and explosion damage; charter grants and goal rewards; other (policy set-up, dev funds).
@@ -94,7 +97,7 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  */
 export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', roads: 'running', interest: 'running', bills: 'running', fuel: 'running',
-  funeral: 'running', burial: 'running', adrent: 'running',
+  funeral: 'running', burial: 'running', adrent: 'running', levy: 'running', recycling: 'running',
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
@@ -278,6 +281,8 @@ export interface BuildingInfo {
   gateway?: GatewayInfo;
   /** named lists of everyone tied to this building; present only for a `full` inspect */
   people?: BuildingPeople;
+  /** a refuse site (docs/multiplayer-land.md M4, server sim/refuse.ts): its grade, today's tonnes, levy and sales, add-ons, boundary impact */
+  refuse?: RefuseSiteInfo;
   /** road work based here or serving here (docs/mobile-jobs.md): a cab office's taxis, a restaurant's orders and riders, a depot's rounds, a home's bins */
   mobile?: MobileRows[];
   /** harbours (docs/boats.md, server sim/harbours.ts): lanes, sea route, the catch, cargo and berth fees */
@@ -288,6 +293,23 @@ export interface BuildingInfo {
   focus?: FocusInfo;
 }
 
+/** A refuse site's panel section (BuildingInfo.refuse, docs/multiplayer-land.md M4). Money is per day. */
+export interface RefuseSiteInfo {
+  grade: string;
+  /** homes it can empty a day with its add-ons, and homes given to its rounds today */
+  capacity: number; planned: number;
+  today: { homes: number; tonnes: number; levy: number; sales: number };
+  yesterday: { homes: number; levy: number; sales: number };
+  /** the levy and the sales per tonne handled at this grade with these add-ons, and what it sells */
+  perTonne: { levy: number; sales: number; what: string };
+  /** the add-ons (shared/src/refuse.ts REFUSE_ADDONS) and which are fitted */
+  addons: { id: string; label: string; blurb: string; on: boolean; cost: number; upkeep: number }[];
+  /** what it pushes onto other owners' land at full use, per nuisance kind (percent) against the limit, and whose land */
+  impact: { kind: string; pct: number; limit: number; owner: string }[];
+  summary: string;
+  /** the viewer may change its add-ons */
+  mine?: boolean;
+}
 /** A Focus group's finding for one parcel (docs/motivation.md, BuildingInfo.focus): its grown-ups' values in whole percentages. */
 export interface FocusInfo {
   parcel: string;
@@ -614,6 +636,8 @@ export type ClientMsg =
   | { t: 'ruleProbe'; rule: StreetRuleId; tiles: [number, number][]; seq: number }
   /** R5: the visitor limit on the gateway whose door is (x, y): half the visitors come in by it */
   | { t: 'gatewayLimit'; x: number; y: number; on: boolean }
+  /** fit or remove an add-on at the refuse site whose door is (x, y) (docs/multiplayer-land.md M4, shared/src/refuse.ts REFUSE_ADDONS) */
+  | { t: 'refuseAddon'; x: number; y: number; addon: string; on: boolean }
   /** R5: the Traffic panel's figures (answered with 'trafficPanel'); asked again every few seconds while it is open */
   | { t: 'trafficPanel' }
   /** R5: why the traffic in chunk (cx, cy) is held up (answered with 'jamWhy'); asked only while the congestion overlay is on */
@@ -693,7 +717,7 @@ export type ServerMsg =
   | { t: 'players'; players: PlayerDTO[] }
   /** flat quads: id, x, y, flags (see packCitizenFlags) */
   | { t: 'citizens'; c: number[] }
-  | { t: 'stats'; day: number; dayFrac: number; population: number; jobs: number; employed: number; moving: number; driving: number; sites: number; outAndAbout: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; /** server tick time over the last minute, ms (sim + flush); absent from older servers */ tickAvg?: number; tickP95?: number; tickMax?: number; /** newcomers in and leavers out through gateways today (absent from older servers) */ migIn?: number; migOut?: number; /** newcomers queued at the gates */ migWaiting?: number; /** game ticks per TICK_MS of wall time for the client's clock: 0 paused, 2 or 4 fast-forward (local mode, docs/local-mode.md); absent means 1 */ rate?: number }
+  | { t: 'stats'; day: number; dayFrac: number; population: number; jobs: number; employed: number; moving: number; driving: number; sites: number; outAndAbout: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; /** server tick time over the last minute, ms (sim + flush); absent from older servers */ tickAvg?: number; tickP95?: number; tickMax?: number; /** newcomers in and leavers out through gateways today (absent from older servers) */ migIn?: number; migOut?: number; /** newcomers queued at the gates */ migWaiting?: number; /** the regional fund (docs/multiplayer-land.md M4: the landfill levy in, adopted road upkeep out), whole dollars; absent from older servers */ fund?: number; /** game ticks per TICK_MS of wall time for the client's clock: 0 paused, 2 or 4 fast-forward (local mode, docs/local-mode.md); absent means 1 */ rate?: number }
   | { t: 'building'; x: number; y: number; info: BuildingInfo | null }
   | { t: 'road'; x: number; y: number; info: RoadInfo | null }
   | { t: 'citizen'; id: number; info: CitizenInfo | null }

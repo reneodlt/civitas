@@ -54,6 +54,9 @@ export const GROUPS: GroupDef[] = [
   // utilities (docs/utilities.md): the power network's nodes and depot, and its plants (buildings/utilities.ts)
   { id: 'grid', label: 'Power grid', section: 'Services', color: '#d9a43a', holds: 'staff', stages: true },
   { id: 'power', label: 'Power stations', section: 'Services', color: '#8f9aa6', holds: 'staff' },
+  // refuse grades (docs/multiplayer-land.md section 5, M4): open tip to energy from waste (buildings/refuse.ts); `stages`:
+  // grades, not sizes, so a cleaner rung may hold fewer staff
+  { id: 'refuse', label: 'Refuse', section: 'Services', color: '#8a7a62', holds: 'staff', stages: true },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // world landmarks (buildings/landmarks-world*.ts): the same, for cities around the world; one picker per city

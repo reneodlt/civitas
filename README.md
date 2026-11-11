@@ -407,6 +407,14 @@ changing behaviour in game time.
   bicycles and mopeds that filter past queues at the kerb edge; waste and recycling depots (a share of industry) send
   bin lorries round each district on its weekday, stopping at every home's kerb while a bin is tipped, and street
   sweepers two days later; warehouses and distribution centres send courier vans in a morning and an afternoon wave.
+  *Refuse sites* (docs/multiplayer-land.md "Built: M4"): a player can place a refuse site of their own, in five grades
+  (Utilities track: an open tip and a lined landfill, then a recycling centre and a composting and digester site, then an
+  energy-from-waste plant; `shared/src/buildings/refuse.ts`, `shared/src/refuse.ts`). Rounds go to a site with room
+  before an old depot; each grade has its own nuisance per tonne in the Neighbourhood layer (the tip worst), pays the
+  landfill levy on what it landfills and on its smoke into the world's regional fund (which pays adopted public roads'
+  upkeep), and the cleaner grades sell materials, gas or power back. A site's panel fits add-ons (an enclosure,
+  screening, restricted hours) and shows what it pushes onto other owners' land against the boundary limits; a site
+  that would push more than the limit onto someone else's land is refused, and the ghost says so before the click.
   A citizen without a car (or out for the night) weighs a taxi against walking, the bus and driving; homes order food
   at lunch and dinner and get parcels. The workers keep their ordinary jobs, so jobs and housing stay balanced; fares,
   meals, collection fees and parcel fees go to the owners. Tooltips show cab offices, takeaways and depots at work and
@@ -634,8 +642,8 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
 - Griefing controls, the rest: public roads are no longer anyone's to bulldoze (M3, docs/multiplayer-land.md "Built: M3
   roads": the builder pays a public road's upkeep, unused public road fades, road other players use daily is adopted,
-  and a public road other players depend on cannot be taken up). Still to come: closure notices with objections (M5),
-  the regional fund for adopted roads (M4), cheap tracks and frontage contributions.
+  and a public road other players depend on cannot be taken up), and the landfill levy's regional fund pays adopted roads'
+  upkeep (M4). Still to come: closure notices with objections (M5), cheap tracks and frontage contributions.
 
 ## Licence and contributing
 

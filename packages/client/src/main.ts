@@ -3,6 +3,7 @@ import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } f
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, seasonOf, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  refuseGradeOf, boundaryImpact, boundaryRefusal, boundarySummary, type BoundaryImpact,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -327,6 +328,7 @@ ui.roadClassChanged();
 
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
+  worldSeed = m.seed;
   buildings.rotors.seed = m.seed;
   tv.worldSeed = m.seed;
   world.me = m.you;
@@ -398,6 +400,7 @@ ui.mineByName = (name) => world.myPlayer?.name === name;
 ui.mayEditByName = (name) => !world.spectate && (world.sandbox || world.myPlayer?.name === name);
 net.on('utilState', (m) => power.setState(m));
 net.on('utilLinks', (m) => power.setLinks(m));
+ui.onRefuseAddon = (x, y, addon, on) => { net.send({ t: 'refuseAddon', x, y, addon, on }); setTimeout(() => { if (selectedBuilding) net.send({ t: 'inspect', x: selectedBuilding[0], y: selectedBuilding[1], full: true }); }, 300); };
 ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
 ui.onGatewayLimit = (x, y, on) => { net.send({ t: 'gatewayLimit', x, y, on }); setTimeout(() => { if (selectedBuilding) net.send({ t: 'inspect', x: selectedBuilding[0], y: selectedBuilding[1], full: true }); }, 300); };
 charts.me = () => world.myPlayer;
@@ -1197,6 +1200,11 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     }
     let v = placeMemo.v;
     const p = v.placed;
+    // a refuse site (M4): what it would push onto other owners' land at full use, against the boundary limits
+    if (v.ok && p && refuseGradeOf(kind)) {
+      const b = refuseImpactAt(kind, p.doorX, p.doorY);
+      if (b && !b.ok) v = { ok: false, reason: boundaryRefusal(b, refuseGradeOf(kind)!.name, (o) => world.players.get(o)?.name ?? o) ?? '', placed: p };
+    }
     if (v.ok && isMetroStationKind(kind)) { // the surface allows it; the platform under it must too
       const pp = platformAt(kind, h, p, rot);
       if (!pp.ok) v = { ok: false, reason: pp.reason ?? 'No room for a platform', placed: p };
@@ -1212,6 +1220,18 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
   }
   const s = world.structureAt(h[0], h[1]);
   return s ? { x: s.ax, y: s.ay, w: s.w, h: s.h, placed: s, existing: true } : { x: h[0], y: h[1], w: 1, h: 1, warn: zoneNoRoad(h[0], h[1]) };
+}
+/** the world's seed (welcome): the value field's spread kernels (shared value.ts valueKernels) read the wind rose from it */
+let worldSeed = 0;
+let impactMemo: { key: string; v: BoundaryImpact | null } | null = null;
+/** A refuse site's boundary impact with its door at (x, y) on the loaded parcels (M4, shared/src/refuse.ts); null in a sandbox. */
+function refuseImpactAt(kind: number, x: number, y: number): BoundaryImpact | null {
+  const key = `${kind}:${x},${y}:${world.parcels.size}`;
+  if (impactMemo?.key === key) return impactMemo.v;
+  const me = world.parcelAt(x, y)?.owner ?? world.me ?? '';
+  const v = world.sandbox ? null : boundaryImpact(kind, 0, x, y, worldSeed, me, (tx, ty) => world.parcelAt(tx, ty)?.owner ?? null);
+  impactMemo = { key, v };
+  return v;
 }
 /** The server's runway rules on the loaded chunks: snap onto a terminal's runway row, check the strip. */
 let runwayMemo: { key: string; at: number; v: RunwayPlan } | null = null;
@@ -1251,6 +1271,8 @@ function updateStatus() {
       const rot = input.rotationOf(input.tool), r = v.placed?.r;
       const facing = r === undefined ? '' : ` · door faces ${FRONT_NAMES[r]} (${rot === undefined ? 'auto' : 'chosen'}; Z/C turn)`;
       s += v.ok ? ` · click to place${facing}` : ` · ${v.reason}${facing}`;
+      const rk = structureTool(input.tool), rp = v.placed;
+      if (v.ok && rp && refuseGradeOf(rk)) { const b = refuseImpactAt(rk, rp.doorX, rp.doorY); if (b) s += ` · ${boundarySummary(b)}`; }
     }
     if (input.tool === 'rail') s += rail.status(input.railPath);
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);

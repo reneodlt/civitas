@@ -63,6 +63,11 @@ export interface Snapshot {
    * upkeep, its use and adoption; optional: a save from before M3 loads with every public road nobody's (`old`)
    */
   publicRoads?: SavedPublicRoad[];
+  /**
+   * the regional fund and refuse sites' add-ons (docs/multiplayer-land.md M4: World.regional, World.refuseAddons as
+   * [x, y, bits]); optional, absent in older saves and while the fund is untouched and no site has an add-on
+   */
+  refuse?: { fund: number; levied: number; paid: number; short: number; addons?: [number, number, number][] };
 }
 export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
@@ -95,6 +100,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.streets.size ? { streets: w.streets.toSave() } : {}),
     ...(w.roadRules.size ? { roadRules: w.roadRulesList() } : {}),
     ...(w.publicRoads.size ? { publicRoads: [...w.publicRoads].map(([k, r]) => { const [x, y] = untkey(k); return { x, y, ...r, ...(r.u ? { u: { ...r.u } } : {}) }; }) } : {}),
+    ...(w.regional.levied || w.regional.paid || w.regional.short || w.refuseAddons.size ? { refuse: { ...w.regional, ...(w.refuseAddons.size ? { addons: [...w.refuseAddons].map(([k, m]) => [...parseKey(k), m] as [number, number, number]) } : {}) } } : {}),
     ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
     ...(w.firesSave ? { fires: w.firesSave() } : {}),
     ...(w.adverts ? advertsField(w.adverts.save()) : {}),
@@ -167,6 +173,11 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     w.publicRoads.set(tkey(x, y), { ...rest, used: Number(rest.used) || 0, om: Number(rest.om) || 0, od: Number(rest.od) || 0 });
   }
   for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
+  if (snap.refuse && typeof snap.refuse === 'object') {
+    const r = snap.refuse, n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    w.regional = { fund: n(r.fund), levied: n(r.levied), paid: n(r.paid), short: n(r.short) };
+    for (const a of Array.isArray(r.addons) ? r.addons : []) if (Array.isArray(a) && Number.isInteger(a[0]) && Number.isInteger(a[1]) && n(a[2]) > 0) w.refuseAddons.set(tileKey(a[0], a[1]), n(a[2]) & 7);
+  }
   if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   if (snap.adverts && typeof snap.adverts === 'object') w.advertsLoaded = snap.adverts;
   if (snap.news && typeof snap.news === 'object') w.newsLoaded = snap.news;

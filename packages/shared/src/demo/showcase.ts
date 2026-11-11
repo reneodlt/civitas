@@ -659,7 +659,7 @@ export const SECTIONS: DemoSection[] = [
   },
   {
     id: 'power', name: 'Power',
-    blurb: 'A power district west of the town (docs/utilities.md): a gas and a coal power station, a grid supply point by the road into town, a row of wind turbines, a solar farm and a power depot whose vans repair faults, joined to two substations in the town by streets, a pylon line and a buried cable. Every few game hours a fault blacks out the streets round one substation until the van has fixed it.',
+    blurb: 'A power district west of the town (docs/utilities.md): a gas and a coal power station, a grid supply point by the road into town, a row of wind turbines, a solar farm and a power depot whose vans repair faults, joined to two substations in the town by streets, a pylon line and a buried cable. Every few game hours a fault blacks out the streets round one substation until the van has fixed it. Along the south road stand the five refuse grades (docs/multiplayer-land.md M4), an open tip to an energy-from-waste plant.',
     land: [{ name: 'Power station', rect: POWER_LAND }],
     roads: [[[-57, 10], [-36, 10]], [[-57, 20], [-36, 20]], [[-57, 11], [-57, 19]]],
     // the in-town substations stand on lots of districts B1 and C1 beside the perimeter road
@@ -675,6 +675,12 @@ export const SECTIONS: DemoSection[] = [
       { id: 'substation-b', kind: 'substation', door: POWER_SUB_B, name: 'Beacon Lane substation' },
       // the wind row's own node: its supply runs along the turbines' road and on round to the grid supply point's
       { id: 'substation-c', kind: 'substation', door: [-50, 21] },
+      // the refuse grades (docs/multiplayer-land.md M4) in a row facing the south road, worst to cleanest
+      { kind: 'open-tip', door: [-56, 19], rot: 0 },
+      { kind: 'lined-landfill', door: [-53, 19], rot: 0 },
+      { kind: 'recycling-centre', door: [-50, 19], rot: 0 },
+      { kind: 'compost-digester', door: [-47, 19], rot: 0 },
+      { kind: 'energy-from-waste', door: [-44, 19], rot: 0 },
     ],
     utilLinks: [
       { id: 'power-pylons', name: 'The pylon line', mode: 'overhead', from: [-45, 13], to: POWER_SUB_A },
@@ -836,6 +842,7 @@ export const TOUR: string[] = [
   'tv-studio', 'broadcast-centre', 'media-centre', 'news-heli', 'live-tv',
   'funeral-director', 'funeral', 'churchyard', 'municipal-cemetery', 'garden-cemetery', 'crematorium',
   'gas-plant', 'coal-plant', 'wind-turbine', 'solar-farm', 'grid-supply-point', 'substation', 'power-pylons', 'power-buried', 'power-depot', 'power-blackout',
+  'open-tip', 'lined-landfill', 'recycling-centre', 'compost-digester', 'energy-from-waste',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',

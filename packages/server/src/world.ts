@@ -347,6 +347,15 @@ export class World {
   /** doors ("x,y") of services and builders' yards their owners mothballed (sim/finance.ts): no staff, no upkeep, no
    *  coverage; saved in the snapshot. A building that goes or changes kind leaves the set (syncBuilding). */
   mothballed = new Set<string>();
+  /** refuse sites' add-ons (shared/src/refuse.ts RefuseAddon bits) by door "x,y" (docs/multiplayer-land.md M4); saved
+   *  (snapshot `refuse`); a site that goes or changes kind loses them at the next midnight (sim/refuse.ts) */
+  refuseAddons = new Map<string, number>();
+  /**
+   * The regional fund (docs/multiplayer-land.md section 5, M4): the landfill levy paid in (per tonne landfilled and per
+   * unit of smoke, sim/refuse.ts) and the upkeep of adopted public roads paid out (sim/publicroads.ts regionalFund). Totals
+   * since the world began; `short` is adopted upkeep the fund could not cover (nobody pays it). Saved (snapshot `refuse`).
+   */
+  regional = { fund: 0, levied: 0, paid: 0, short: 0 };
   /**
    * Road tiles on unclaimed land by tkey (sim/publicroads.ts, docs/multiplayer-land.md M3): builder, use, adoption.
    * Saved (snapshot `publicRoads`); a tile taken into a parcel leaves it (setParcelId).

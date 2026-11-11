@@ -5,7 +5,7 @@ import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
 import { FLEET_LABEL, classDef, namesClass } from '@msimcity/shared';
-import { WEEKDAY_NAMES } from '@msimcity/shared';
+import { WEEKDAY_NAMES, type RefuseSiteInfo } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
 import { chipBalance, ledgerText, ledgerHtml } from './finance';
@@ -419,6 +419,8 @@ export class UI {
   mineByName: ((ownerName: string) => boolean) | null = null;
   /** main.ts: mothball or reopen the building at (x, y) (the `recover` message with its door) */
   onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
+  /** main.ts: fit or take off an add-on at the refuse site whose door is (x, y) (M4, the `refuseAddon` message) */
+  onRefuseAddon: ((x: number, y: number, addon: string, on: boolean) => void) | null = null;
   /** main.ts: the visitor limit at the gateway whose door is (x, y) (R5, the `gatewayLimit` message) */
   onGatewayLimit: ((x: number, y: number, on: boolean) => void) | null = null;
   /** main.ts: may the viewer change a building whose owner has this display name (their own, or anyone's in a sandbox; nobody's in a showcase) */
@@ -440,12 +442,12 @@ export class UI {
     }
     $('clock').innerHTML = `<b>${WEEKDAYS[day % DAYS_PER_WEEK]}</b> ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} <span style="opacity:.6">day ${day}</span>`;
   }
-  setWorldStats(s: { population: number; jobs: number; employed: number; moving: number; driving: number; outAndAbout: number; sites: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; migIn?: number; migOut?: number; migWaiting?: number }, players: number) {
+  setWorldStats(s: { population: number; jobs: number; employed: number; moving: number; driving: number; outAndAbout: number; sites: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; migIn?: number; migOut?: number; migWaiting?: number; fund?: number }, players: number) {
     // players < 0: a local game, nobody else online
     const jam = s.vehicles ? Math.round((100 * s.queued) / s.vehicles) : 0;
     const ws = $('worldstats');
     if (!ws.dataset.wired) { ws.dataset.wired = '1'; ws.addEventListener('click', (e) => { const id = (e.target as HTMLElement).closest<HTMLElement>('[data-chart]')?.dataset.chart; if (id) this.onOpenChart?.(id); }); }
-    ws.innerHTML = `<span class="chartlink" data-chart="pop" title="Population chart">pop <b>${s.population}</b></span> · jobs <b>${s.employed}/${s.jobs}</b> · on the move <b>${s.moving}</b> · <span title="vehicles on the road · share held up · average speed">traffic <b>${s.vehicles}</b> cars, <b class="${jam > 30 ? 'bad' : ''}">${jam}%</b> queued, speed <b>${s.speedPct}%</b></span> · parked <b>${s.parked}</b> · out <b>${s.outAndAbout}</b> · building <b>${s.sites}</b>${s.migIn !== undefined ? ` · <span title="newcomers in · leavers out through the gateways today · waiting at the gates">migration <b class="${s.migIn - (s.migOut ?? 0) < 0 ? 'bad' : ''}">${s.migIn - (s.migOut ?? 0) >= 0 ? '+' : ''}${s.migIn - (s.migOut ?? 0)}</b> (${s.migIn} in, ${s.migOut ?? 0} out${s.migWaiting ? `, ${s.migWaiting} at the gate` : ''})</span>` : ''}${players >= 0 ? ` · online <b>${players}</b>` : ''}`;
+    ws.innerHTML = `<span class="chartlink" data-chart="pop" title="Population chart">pop <b>${s.population}</b></span> · jobs <b>${s.employed}/${s.jobs}</b> · on the move <b>${s.moving}</b> · <span title="vehicles on the road · share held up · average speed">traffic <b>${s.vehicles}</b> cars, <b class="${jam > 30 ? 'bad' : ''}">${jam}%</b> queued, speed <b>${s.speedPct}%</b></span> · parked <b>${s.parked}</b> · out <b>${s.outAndAbout}</b> · building <b>${s.sites}</b>${s.migIn !== undefined ? ` · <span title="newcomers in · leavers out through the gateways today · waiting at the gates">migration <b class="${s.migIn - (s.migOut ?? 0) < 0 ? 'bad' : ''}">${s.migIn - (s.migOut ?? 0) >= 0 ? '+' : ''}${s.migIn - (s.migOut ?? 0)}</b> (${s.migIn} in, ${s.migOut ?? 0} out${s.migWaiting ? `, ${s.migWaiting} at the gate` : ''})</span>` : ''}${s.fund ? ` · <span title="the regional fund: the landfill levy paid in, the upkeep of adopted public roads paid out">regional fund <b>$${s.fund.toLocaleString('en-GB')}</b></span>` : ''}${players >= 0 ? ` · online <b>${players}</b>` : ''}`;
   }
   setHeat(on: boolean) {
     const b = $('heat');
@@ -651,6 +653,7 @@ export class UI {
     if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
     if (info.media) html += mediaHtml(info.media, row);
     if (info.remembrance) html += remembranceHtml(info.remembrance, row);
+    if (info.refuse) html += refuseHtml(info.refuse, row, !!this.onRefuseAddon);
     if (info.utilities) html += utilitiesHtml(info.utilities, row, !!info.parcel && this.mineByName?.(info.parcel.owner) === true);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
@@ -746,6 +749,8 @@ export class UI {
     panel.onclick = (e) => {
       const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
       if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
+      const ra = (e.target as HTMLElement).closest<HTMLElement>('[data-addon]'); // a refuse site's add-on switch (M4)
+      if (ra) { this.onRefuseAddon?.(info.x, info.y, ra.dataset.addon!, ra.dataset.on === '1'); return; }
       const ub = (e.target as HTMLElement).closest<HTMLElement>('[data-util]'); // a node's protect or grid import switch (utilities.ts)
       if (ub) { this.onUtil?.(info.x, info.y, ub.dataset.util as 'protect' | 'import', ub.dataset.on === '1'); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
@@ -1074,3 +1079,24 @@ const policiesOf = (t: { unlocks: string[] }) => {
   return names.length ? `<div class="pol">Policies: ${names.join(', ')}</div>` : '';
 };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+/**
+ * A refuse site's section (BuildingInfo.refuse, docs/multiplayer-land.md M4): grade, today's tonnes, the landfill levy
+ * and sales, what it pushes onto others' land against the limits, and its add-on switches for the owner.
+ */
+function refuseHtml(r: RefuseSiteInfo, row: (k: string, v: string | number) => string, switches: boolean): string {
+  const m = (v: number) => `$${v.toFixed(2)}`;
+  let h = `<div class="sect">Refuse site: ${esc(r.grade)}</div>`;
+  h += row('Takes', `up to ${r.capacity} homes a day · ${r.planned} on today's rounds`);
+  h += row('Today', `${r.today.homes} homes, ${r.today.tonnes} t · levy ${m(r.today.levy)}${r.today.sales ? ` · sales ${m(r.today.sales)}` : ''}`);
+  h += row('Yesterday', `${r.yesterday.homes} homes · levy ${m(r.yesterday.levy)}${r.yesterday.sales ? ` · sales ${m(r.yesterday.sales)}` : ''}`);
+  h += row('Per tonne', `levy ${m(r.perTonne.levy)}${r.perTonne.sales ? ` · sells ${esc(r.perTonne.what)} for ${m(r.perTonne.sales)}` : ''}`);
+  h += row('At the boundary', esc(r.summary));
+  for (const i of r.impact) h += row(`  ${esc(i.kind)}`, `<span class="${i.pct > i.limit ? 'bad' : ''}">${i.pct}%</span> of ${i.limit}% allowed${i.owner ? ` (${esc(i.owner)}'s land)` : ''}`);
+  const on = r.addons.filter((a) => a.on).map((a) => a.label.toLowerCase());
+  h += row('Add-ons', on.length ? esc(on.join(', ')) : 'none');
+  if (switches && r.mine) {
+    h += '<div class="utilsw">' + r.addons.map((a) => `<button class="chip" data-addon="${a.id}" data-on="${a.on ? 0 : 1}" title="${esc(a.blurb)}">${a.on ? `Take off ${esc(a.label.toLowerCase())}` : `Fit ${esc(a.label.toLowerCase())}${a.cost ? ` ($${a.cost.toLocaleString('en-GB')}` + (a.upkeep ? `, $${a.upkeep}/day)` : ')') : ''}`}</button>`).join(' ') + '</div>';
+  }
+  return h;
+}

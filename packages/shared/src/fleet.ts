@@ -1,6 +1,7 @@
 import { MANIFEST, DESIGN_COUNT_TABLE, TOP_LEVEL_TABLE, KIND_ID } from './buildings/compiled';
 import { LEVEL_SLOTS } from './buildings/codes';
 import { hash2 } from './noise';
+import { isRefuseSite } from './refuse';
 import { designPick } from './leisure';
 import type { Occupation } from './occupations';
 
@@ -56,6 +57,8 @@ export const MOBILE = {
   /** industrial buildings that are waste and recycling depots; of their staff, bin crews and sweeper drivers (the rest sort and bale) */
   wasteDepotShare: 0.08,
   binCrewShare: 0.5,
+  /** staff of a placed refuse site (shared/src/refuse.ts, M4) who are bin crews: most of them (the rest sort, tip and sweep) */
+  siteCrewShare: 0.66,
   sweeperShare: 0.12,
   /** staff of a secondary school who drive its school bus (docs/education.md section 16): a school of 24 has two or three */
   schoolBusShare: 0.08,
@@ -190,6 +193,8 @@ for (const k of MANIFEST) {
 }
 /** Is this industrial building a waste and recycling depot (bin lorries, street sweepers)? A tile hash, so its sign agrees. */
 export const isWasteDepot = (kindId: number, x: number, y: number) => INDUSTRIAL_IDS[kindId] === 1 && kindId !== IND_DEPOT && hash2(x * 41 + 5, y * 13 + 17) < MOBILE.wasteDepotShare;
+/** Is this a base for bin lorries: a placed refuse site (M4) or one of the old waste depots (a share of industry)? */
+export const isRefuseDepot = (kindId: number, x: number, y: number) => isRefuseSite(kindId) || isWasteDepot(kindId, x, y);
 /** Is this industrial building a parcel depot? Distribution centres, the warehouse and freight-yard models, and a hashed share of the rest. */
 export function isCourierDepot(kindId: number, level: number, x: number, y: number): boolean {
   if (kindId === IND_DEPOT) return true;
@@ -219,6 +224,11 @@ export function mobileRole(kindId: number, level: number, wx: number, wy: number
   if (isFoodVenue(kindId, wx, wy)) {
     if (hash2(id, 433) >= MOBILE.riderShare) return null;
     return { kind: hash2(id, 435) < MOBILE.bicycleShare ? FleetKind.Bicycle : FleetKind.Moped, fromHome: false };
+  }
+  // a refuse site (docs/multiplayer-land.md M4, shared/src/refuse.ts): most of its staff are bin crews, a few drive sweepers
+  if (isRefuseSite(kindId)) {
+    const r = hash2(id, 437);
+    return r < MOBILE.siteCrewShare ? { kind: FleetKind.BinLorry, fromHome: false } : r < MOBILE.siteCrewShare + MOBILE.sweeperShare ? { kind: FleetKind.Sweeper, fromHome: false } : null;
   }
   if (isWasteDepot(kindId, wx, wy)) {
     const r = hash2(id, 437);

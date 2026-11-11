@@ -484,3 +484,87 @@ Step 1 only: value steers who moves where and how tall a neighbourhood grows. No
   not an extra share smeared over the whole parcel.
 - Overlay chunks go as per-tile bytes on the existing overlay message (4x4 cells expanded), not a new cell-byte message.
 - Depot use is today and yesterday averaged, so a depot's smell fades over a weekend without collections.
+
+## Built: M4 grades, levy and limits (2026-11-11)
+
+Section 5 for the refuse family: five grades as placeable buildings, three add-ons, the landfill levy into a world
+regional fund that pays adopted public roads, and boundary limits checked when a site is placed or an add-on taken off.
+Code: `shared/src/buildings/refuse.ts` (the kinds), `shared/src/refuse.ts` (grades, add-ons, levy, limits; browser-safe),
+`server/src/sim/refuse.ts` (routing, the levy, add-on upkeep, the panel), `server/src/sim/value.ts` (emissions),
+`server/src/net.ts` (`boundaryRefusal`, the `refuseAddon` intent), `World.regional` and `World.refuseAddons`. Check:
+`npm run refuse:check` (`server/src/refuse-check.ts`).
+
+**Grades.** Placed buildings, not upgrades of a depot: the catalogue already places plants this way (civic sub-kinds
+of the transport-hub family, like the power stations), and a grade changes what the building is. Kind ids 217-221, all
+2×2, the `refuse` ladder (Services), on the Utilities track: Waste management (`ut4`, tier 1, 30 housed: open tip,
+lined landfill), Recycling (`ut5`, tier 2, 150 housed: recycling centre, composting and digester site), Energy from
+waste (`ut6`, tier 3, needs Power stations: the plant). Per grade (`REFUSE_GRADES`; money a day at 100 homes, 25 t):
+
+| Grade | Build, upkeep | Takes (homes a day) | Landfilled | Sells | Levy | Net cost a day (with half the staff wages) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Open tip | $1,500, $12 | 160 | all | nothing | $75 | $164 |
+| Lined landfill | $4,500, $30 | 160 | all | landfill gas $0.30/t | $75 | $188 |
+| Recycling centre | $6,000, $40 | 140 | 30% residue | materials $1.60/t | $22.50 | $131 |
+| Composting and digester | $8,000, $45 | 100 | 20% | gas and compost $2.20/t | $15 | $95 |
+| Energy from waste | $14,000, $80 | 200 | 10% ash | power $3.20/t | $57.50 (smoke $50) | $205 |
+
+Emissions per home emptied a day, in M1's value units: the tip smell 0.03, heavy traffic 0.013, noise 0.006, eyesore up
+to 0.8 once busy (20 homes); the lined landfill about half the smell and eyesore; the recycling centre little smell but
+the most noise; composting the gentlest; energy from waste smoke (0.5 units a tonne, each 0.1 smell and 0.016 hazard)
+carried downwind. Nuisance still follows use: `ValueField` feeds a site's smoothed homes a day through
+`refuseEmission`, so an idle site gives off nothing. At equal use the tip leaves the least value at its cell (0.38 at 100
+homes against 0.44-0.66). Most of a site's staff are bin crews (`MOBILE.siteCrewShare` 0.66) and sweeper drivers.
+
+**Routing.** The rounds (unchanged otherwise) pick, for each district due today, the nearest refuse site in reach with
+crews and room for the district's homes today (its capacity, less with restricted hours) before any old depot; a site
+with some room left takes what fits and the rest wait a week (counted unserved); only when no site has room does an old
+depot take the district. The old hashed depots (a share of industry) still collect where no site reaches, unchanged
+and unlevied: they are other players' factories, not a choice their owners made.
+
+**Levy and fund.** Each home a site's lorry empties (`Refuse.tip`) pays `LANDFILL_LEVY`: $3 a tonne landfilled and $4 a
+unit of smoke (a home is 0.25 t), from the site's owner (ledger line `levy`, "Landfill levy", running) into
+`World.regional.fund`; the grade's sales come back at the same moment (line `recycling`, "Recycling, gas and power
+sales", running). At midnight `PublicRoads.regionalFund` (M3's hook) is handed the adopted tiles' upkeep and the fund
+pays it as far as it goes; what it cannot cover is nobody's, as before (`World.regional.short`). The fund is saved as
+the optional snapshot field `refuse` (with the levied, paid and short totals and the add-ons), and shown in the world
+stats line ("regional fund $N", from the `stats` message's `fund`). With the levy, a recycling centre at 100 homes a day
+costs $131 a day against the tip's $164; on a trickle (5 homes) the tip is cheaper, $92 against $147.
+
+**Add-ons.** Settings per site, bits in `World.refuseAddons` (by door), set by the `refuseAddon` intent from the building
+panel (owner only; anyone's in a sandbox; refused in administration when it costs money): an enclosure ($3,000, $15 a
+day: smell x0.4, noise x0.5, eyesore x0.6, smoke x0.4, its scrubbers also cutting the smoke levy), screening ($700, $3 a
+day: noise x0.65, eyesore x0.3, smell x0.9) and restricted hours (free: no night working, noise x0.6, lorry traffic
+x0.85, and 30% less a day). Upkeep is charged at midnight (`Refuse.newDay`, ledger `upkeep`); taking one off refunds
+nothing. A lorry route is not built: the neighbours' own answer, an HGV ban on their streets, already exists.
+
+**Boundary limits.** `boundaryImpact` spreads a site's expected emission at full use (its capacity with its add-ons)
+with this world's M1 kernels (round, or the wind rose's plume) over 4×4 cells, and takes the worst of each nuisance
+kind over every tile whose owner is not the builder; the builder's own land and unclaimed land are not limited. Limits
+(`BOUNDARY_LIMITS`, intensity 0-1, the value byte / 255): noise 40%, smell and smoke 35%, heavy traffic 45%, hazard 20%,
+disorder 40%, eyesore 40%. `net.ts placeStructure` refuses a site over a limit with the reason ("The open tip would push
+97% smell and smoke (and heavy traffic) onto Bob's land at full use; the limit at a boundary is 35%. Choose a cleaner
+grade, add screening or an enclosure, or build further back"); an add-on change that raises any kind and leaves it over
+a limit is refused the same way (so land a neighbour bought since cannot be made worse, but a site built first is not
+closed). The client's ghost runs the same function on the loaded parcels: red with the reason, or the worst kind
+against its limit on the status line; a site's panel lists its impact per kind and whose land. Sandboxes have no limits.
+In the check's world (seed 4242), with a neighbour on every side, a tip needs 35-40 tiles between its door and the
+neighbour's land (the plume's direction; less upwind), a lined landfill and an energy-from-waste plant about 30 (an
+enclosed plant about 20), while a recycling centre or a composting site may stand beside the boundary.
+
+**Measured.** refuse:check: all pass (grades' order, add-ons lower every grade, the money, the placements, add-on
+costs and refusals, the levy into the fund, the fund paying roads, routing, the value field (smell 0.20 at a tip against
+0.08 at a composting site after 40 homes each), the save round trip). `loadtest/mobile.ts --grade recycling` (2×2
+districts; every old depot made a recycling centre): 67 and 59 homes emptied on two weekdays, 16.75 and 14.75 t handled,
+levy $15.07 and $13.28 into the fund, $26.80 and $23.60 of materials sold; the sim's ms per tick as without
+(5.2/4.6 against 5.0/4.7).
+
+**Differences from the design.**
+
+- Only refuse has grades; other nuisance buildings (works, plants, venues) are not limited yet, and industry grows
+  rather than being placed. The limit is the builder's own contribution at full use, not the long-run total at the
+  boundary with everyone else's.
+- Restricted hours cut noise and throughput as a factor: the rounds already run in the day, so "no night activity" is
+  modelled, not simulated hour by hour.
+- Energy from waste sells power as a ledger line; it does not feed the utilities network.
+- Scrubbers are the enclosure add-on on the energy-from-waste plant, not a separate fitting.
+- The client checks limits against the parcels it has loaded; the server's check is the one that counts.

@@ -29,6 +29,7 @@ import { EDUCATION } from './education';
 import { MEDIA } from './media';
 import { REMEMBRANCE } from './remembrance';
 import { POWER } from './utilities';
+import { REFUSE_SITES } from './refuse';
 
 /**
  * Every building kind. This is source data: only the compile step
@@ -56,6 +57,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...REMEMBRANCE,
   // utilities (docs/utilities.md section 2): kind ids 160-166, the power network's nodes, depot and plants, placed sub-kinds of the transport-hub family
   ...POWER,
+  // refuse grades (docs/multiplayer-land.md section 5, M4): kind ids 217-221, placed sub-kinds of the transport-hub family
+  ...REFUSE_SITES,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS,
   // world landmarks (docs/buildings.md "Landmarks"): real buildings in cities around the world, one collection per city
