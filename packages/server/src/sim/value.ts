@@ -2,7 +2,7 @@ import {
   CHUNK_SIZE, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, CitizenState, VehicleClass, KIND_COUNT, SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF,
   VALUE, ValueKind, VALUE_KINDS, VALUE_KIND_COUNT, VALUE_SLOTS, VALUE_SLOT_VALUE, VALUE_CELL, VALUE_CELLS, VALUE_CELLS_PER_CHUNK,
   AVERAGE_VALUE_WEIGHTS, valueKernels, combineValue, nuisanceShare, valueByte, valueHighlights, industryAttrs, isLandmarkKind,
-  isWasteDepot, isPowerPlant, UTIL_POLLUTION_OF, leisureAt, capacityOf, tileKey, isRoad, zoneOf, type Airport, type ValueKernel,
+  isWasteDepot, isPowerPlant, refuseGradeOf, refuseEmission, UTIL_POLLUTION_OF, leisureAt, capacityOf, tileKey, isRoad, zoneOf, type Airport, type ValueKernel,
 } from '@msimcity/shared';
 import type { Building, Mover, World } from '../world';
 import { tkey, untkey } from '../world';
@@ -171,6 +171,7 @@ export class ValueField {
   // ---- the emission grid -----------------------------------------------------------------------------
 
   private emit = new Map<number, Float32Array>();
+  private siteEmit = new Float64Array(K);
   private add(x: number, y: number, kind: number, units: number) {
     if (!(units > 0)) return;
     const gx = Math.floor(x / VALUE_CELL), gy = Math.floor(y / VALUE_CELL);
@@ -195,7 +196,15 @@ export class ValueField {
         this.emptyFor.set(key, h);
         if (h >= E.emptyHours) { this.add(b.x, b.y, ValueKind.Disorder, E.emptyDisorder); this.add(b.x, b.y, ValueKind.Eyesore, E.emptyEyesore); }
       } else this.emptyFor.delete(key);
-      if (b.zone === Zone.Industrial) {
+      if (refuseGradeOf(b.id)) {
+        // a refuse site (M4, shared/src/refuse.ts): its grade's emission per home emptied a day, through its add-ons
+        const v = (this.wasteEma.get(key) ?? 0) * (1 - VALUE.smooth) + this.host.handledAt(b.x, b.y) * VALUE.smooth;
+        if (v < 0.05) this.wasteEma.delete(key); else this.wasteEma.set(key, v);
+        if (v >= 0.05) {
+          const u = refuseEmission(b.id, w.refuseAddons.get(sk) ?? 0, v, this.siteEmit);
+          for (let k = 0; k < K; k++) if (u[k] > 0) this.add(b.x, b.y, k, u[k]);
+        }
+      } else if (b.zone === Zone.Industrial) {
         if (isWasteDepot(b.id, b.x, b.y)) {
           const v = (this.wasteEma.get(key) ?? 0) * (1 - VALUE.smooth) + this.host.handledAt(b.x, b.y) * VALUE.smooth;
           if (v < 0.05) this.wasteEma.delete(key); else this.wasteEma.set(key, v);

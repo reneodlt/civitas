@@ -262,6 +262,12 @@ export class Simulation {
     this.gateways = new Gateways(w);
     this.control = new TrafficControl(w, this.traffic, this.gateways);
     this.publicRoads = new PublicRoads(w, this.traffic, this.gateways, (owner, msg) => this.notices.push({ owner, msg }));
+    // the regional fund (docs/multiplayer-land.md M4): the landfill levy (sim/refuse.ts) pays adopted public roads' upkeep;
+    // what it cannot cover is nobody's, as before M4
+    this.publicRoads.regionalFund = (upkeep) => {
+      const r = this.w.regional, pay = Math.min(Math.max(0, r.fund), upkeep);
+      r.fund -= pay; r.paid += pay; r.short += upkeep - pay;
+    };
     this.mobile = new Mobile(w, this.traffic);
     this.taxis = new Taxis(w, this.mobile);
     this.mobile.register(this.taxis);
@@ -837,6 +843,7 @@ export class Simulation {
     }
     this.control.chargeCurfew(); // the lorry curfew's running cost (R5)
     this.publicRoads.newDay(); // public road: the builders' upkeep, adoption, fading (sim/publicroads.ts)
+    this.refuse.newDay(); // refuse sites' add-ons: upkeep (M4)
     w.parkFail.clear(); w.lotIncome.clear();
     this.leisureCache.clear(); // drops homes that are gone; the rest refill on first use
     this.jobMisses.clear(); // likewise

@@ -32,6 +32,12 @@ export const KIND_SPOTS: Spot[] = [
   ['barrier-grid', 'grid-supply-point', 51.5010, 0.0360, 'E', 'N'],
   ['lots-road-depot', 'power-depot', 51.4777, -0.1819, 'N', 'N'],
   ['rainham-solar', 'solar-farm', 51.5170, 0.1500, 'W', 'N'],
+  // refuse (docs/multiplayer-land.md M4): the Rainham landfill on the marshes, SELCHP's energy-from-waste plant at
+  // Deptford, the Western Riverside recycling at Wandsworth, the Beckton works' digesters
+  ['rainham-landfill', 'lined-landfill', 51.5080, 0.1750, 'N', 'N'],
+  ['selchp', 'energy-from-waste', 51.4836, -0.0461, 'N', 'S'],
+  ['western-riverside', 'recycling-centre', 51.4600, -0.1880, 'N', 'S'],
+  ['beckton-digesters', 'compost-digester', 51.5180, 0.0880, 'W', 'N'],
   // media (docs/media.md): Broadcasting House on Portland Place, ITV on the South Bank
   ['broadcasting-house', 'broadcast-centre', 51.5185, -0.1439, 'E'],
   ['itv-south-bank', 'media-centre', 51.5072, -0.1105, 'N', 'S'],
@@ -106,6 +112,10 @@ export const KIND_VENUES: Spot[] = [
 /** Names (World.setStopName at the door: the tooltips read right), the dead of a resting place, the hour a stop is shown at. */
 const EXTRA: Record<string, Pick<DemoPlacement, 'name' | 'graves' | 'hour' | 'aside'>> = {
   'battersea-power': { name: 'Battersea Power Station' },
+  'rainham-landfill': { name: 'Rainham landfill' },
+  selchp: { name: 'SELCHP energy recovery facility' },
+  'western-riverside': { name: 'Western Riverside recycling centre' },
+  'beckton-digesters': { name: 'Beckton digesters' },
   'beckton-gas': { name: 'Beckton Gas Works' },
   'barrier-grid': { name: 'Thames Barrier grid supply point' },
   'lots-road-depot': { name: 'Lots Road power depot' },
@@ -212,6 +222,7 @@ export function withKindsTour(tour: readonly string[]): string[] {
 export const CITY_DEMO_GROUPS = new Set<string>(['paris', 'new-york', 'san-francisco']);
 export const LONDON_EXEMPT: Record<string, string> = {
   camp: 'the pioneer camp is a new player\'s first settlers, one per player, on a frontier start; London is a built city',
+  'open-tip': 'London has had no open tips for decades: its rubbish goes to lined landfill, recycling and energy from waste (all placed)',
   // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts) whose own cities have no demos yet, so none
   // can stand in one; each places only in sandboxes and ?dev clients behind the locked tech node wld1. The sample
   // cities' landmarks (CITY_DEMO_GROUPS) stand in their own cities' demos instead (showcase.ts cityProblems)

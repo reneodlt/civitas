@@ -14,6 +14,7 @@ import {
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
   planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
   STREET_RULE_BY_ID, StreetRule, isStreetRuleId, busLaneProblem, GATEWAY_OF, MOTORWAY_KIND, VISITOR_LIMIT_SHARE,
+  refuseGradeOf, boundaryImpact, boundaryRefusal, REFUSE_ADDON_BY_ID,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -255,6 +256,7 @@ export class Net {
       case 'undoStreetRule': return this.undoStreetRule(c);
       case 'ruleProbe': return this.send(c, { t: 'ruleProbe', seq: Number(m.seq) || 0, ...this.ruleProbe(m.tiles) });
       case 'gatewayLimit': return this.gatewayLimit(c, Math.floor(Number(m.x)), Math.floor(Number(m.y)), m.on === true);
+      case 'refuseAddon': return this.refuseAddon(c, Math.floor(Number(m.x)), Math.floor(Number(m.y)), String(m.addon), m.on === true);
       case 'trafficPanel': return this.send(c, { t: 'trafficPanel', info: this.sim.control.panel(c.player.id, (o) => this.mayEdit(c.player!, o)) });
       case 'jamWhy': { const cx = Math.floor(Number(m.cx)), cy = Math.floor(Number(m.cy)); if (!Number.isFinite(cx) || !Number.isFinite(cy)) return; return this.send(c, { t: 'jamWhy', cx, cy, u: this.sim.control.jamWhy(cx, cy, (mv) => (mv as { leg?: { arrive?: string } | null }).leg?.arrive === 'parkLot') }); }
       case 'renameStreet': return this.renameStreet(c, m.x, m.y, m.ns === true, m.name);
@@ -1061,6 +1063,48 @@ export class Net {
     this.toast(c, on ? `Visitor limit on: ${Math.round(VISITOR_LIMIT_SHARE * 100)}% of visitors come in here, fewer cars on your streets and less visitor tax` : 'Visitor limit off: every visitor comes in', 'info');
   }
 
+  /**
+   * Boundary limits (docs/multiplayer-land.md section 5, M4): the refusal for a refuse site of `kind` with add-ons `mask`,
+   * its door at (x, y), that would push more of some nuisance onto another owner's land at full use than the limit
+   * (shared/src/refuse.ts boundaryImpact); null when it passes, for any other kind, and in a sandbox (anyone may change
+   * anything there). The builder's own land and unclaimed land are not limited.
+   */
+  private boundaryRefusal(p: Player, kind: number, x: number, y: number, mask: number): string | null {
+    const g = refuseGradeOf(kind);
+    if (!g || this.cfg.sandbox) return null;
+    const builder = this.w.parcelAt(x, y)?.owner ?? p.id;
+    const imp = boundaryImpact(kind, mask, x, y, this.w.seed, builder, (tx, ty) => this.w.parcelAt(tx, ty)?.owner);
+    return boundaryRefusal(imp, g.name, (o) => this.w.players.get(o)?.name ?? o);
+  }
+
+  /** Fit or take off an add-on at a refuse site (M4): fitting costs its price; a change that raises emissions meets the boundary limits again. */
+  private refuseAddon(c: Client, x: number, y: number, addon: string, on: boolean) {
+    const p = c.player!;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const [dx, dy] = this.w.doorOf(x, y), key = `${dx},${dy}`;
+    const b = this.w.buildings.get(key), g = b && refuseGradeOf(b.id);
+    if (!b || !g) return this.toast(c, 'That is not a refuse site');
+    const q = this.w.parcelAt(dx, dy);
+    if (q ? !this.mayEdit(p, q.owner) : !this.cfg.sandbox) return this.toast(c, 'Not your refuse site');
+    const a = REFUSE_ADDON_BY_ID.get(addon as never);
+    if (!a) return this.toast(c, 'Unknown add-on');
+    const mask = this.w.refuseAddons.get(key) ?? 0, next = on ? mask | a.bit : mask & ~a.bit;
+    if (next === mask) return;
+    if (on && a.cost > 0 && p.admin) return this.toast(c, 'In administration: fitting add-ons is stopped until a midnight finds the treasury at zero or above');
+    // taking an add-on off raises what reaches the neighbours: the limits apply again
+    if (!this.cfg.sandbox) {
+      const owner = q?.owner ?? p.id, at = (tx: number, ty: number) => this.w.parcelAt(tx, ty)?.owner;
+      const before = boundaryImpact(b.id, mask, dx, dy, this.w.seed, owner, at), after = boundaryImpact(b.id, next, dx, dy, this.w.seed, owner, at);
+      if (after.over.some((k) => after.worst[k] > before.worst[k] + 1e-9)) return this.toast(c, boundaryRefusal(after, g.name, (o) => this.w.players.get(o)?.name ?? o)!);
+    }
+    if (on && a.cost > 0) {
+      if (this.w.spendable(p) < a.cost) return this.toast(c, this.w.shortOf(p, a.cost, `for the ${a.label.toLowerCase()}`));
+      this.w.credit(q?.owner ?? p.id, -a.cost, 'build');
+    }
+    if (next) this.w.refuseAddons.set(key, next); else this.w.refuseAddons.delete(key);
+    this.toast(c, on ? `${a.label} fitted at the ${g.name}${a.cost ? ` for $${a.cost.toLocaleString('en-GB')}` : ''}${a.upkeep ? `, $${a.upkeep} a day upkeep` : ''}: ${a.blurb}` : `${a.label} taken off the ${g.name}`, 'info');
+  }
+
   /** Rename the street through road tile (x, y) along `ns` (streets.ts): its owner only (anyone's in a sandbox). */
   private renameStreet(c: Client, x: number, y: number, ns: boolean, name: string) {
     const p = c.player!;
@@ -1093,6 +1137,8 @@ export class Net {
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
     if (budget < CIVIC_COST[kind]) { this.toast(c, this.w.shortOf(p, CIVIC_COST[kind], `for the ${KIND_NAMES[kind]}`)); return false; }
+    const limit = this.boundaryRefusal(p, kind, verdict.placed.doorX, verdict.placed.doorY, 0); // a refuse site's nuisance at others' boundaries (M4)
+    if (limit) { this.toast(c, limit); return false; }
     const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
     if (sea) { this.toast(c, sea); return false; }
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
@@ -1351,6 +1397,8 @@ export class Net {
     if (info && util) info.utilities = util;
     const media = info && this.news?.describe(b!);
     if (info && media) info.media = media;
+    const rq = this.w.parcelAt(dx, dy), ref = info && this.sim.refuse.siteInfo(b!, !!c.player && (rq ? this.mayEdit(c.player, rq.owner) : this.cfg.sandbox));
+    if (info && ref) info.refuse = ref;
     const rem = info && this.sim.death.panel(b!);
     if (info && rem) info.remembrance = rem;
     // Focus groups (Culture tier 2, docs/motivation.md): what the people of a home's parcel care about, for a viewer who has it
@@ -1459,6 +1507,7 @@ export class Net {
       vehicles: this.sim.traffic.lastVehicles, queued: this.sim.traffic.lastQueued, speedPct: Math.round(this.sim.traffic.lastSpeedPct * 100), parked: this.sim.parkedCars,
       ...(this.tickStats ? { tickAvg: this.tickStats.avg, tickP95: this.tickStats.p95, tickMax: this.tickStats.max } : {}),
       ...this.migStats(),
+      fund: Math.round(w.regional.fund),
       ...(this.rate !== 1 ? { rate: this.rate } : {}),
     });
   }
