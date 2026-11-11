@@ -53,6 +53,7 @@ export * from './education';
 export * from './weather';
 export * from './value';
 export * from './refuse';
+export * from './planning';
 export * from './policies';
 export * from './issues';
 export * from './ranks';

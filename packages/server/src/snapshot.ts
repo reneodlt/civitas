@@ -74,6 +74,8 @@ export interface Snapshot {
    * optional, absent in older saves and while there are none (covenants are on the parcels, `Parcel.cov`)
    */
   landDeals?: LandDealsSave;
+  /** planning applications, refused designs and approved conditions (sim/planning.ts PlanningSave, docs/multiplayer-land.md M5); optional, absent in older saves and while there are none */
+  planning?: object;
 }
 export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
@@ -114,6 +116,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.deathSave ? deathField(w.deathSave()) : {}),
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
     ...(w.landDealsSave ? landDealsField(w.landDealsSave()) : {}),
+    ...(w.planningSave ? planningField(w.planningSave()) : {}),
   };
 }
 
@@ -130,6 +133,8 @@ const utilitiesField = (u: UtilitiesSave | null) => (u ? { utilities: u } : {});
 
 /** The land market field, left out while there are no deals (so a save without them is as before). */
 const landDealsField = (d: LandDealsSave | null) => (d ? { landDeals: d } : {});
+/** The planning field, left out while there is nothing to keep (so a save without planning is as before). */
+const planningField = (p: object | null) => (p ? { planning: p } : {});
 
 /** Whether this build can read a snapshot of that format (the current one, or one it upgrades in place). */
 export const readableVersion = (version: number | undefined) => version === VERSION || UPGRADES_FROM.includes(version as number);
@@ -194,6 +199,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.death && typeof snap.death === 'object') w.deathLoaded = snap.death;
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
   if (snap.landDeals && typeof snap.landDeals === 'object') w.landDealsLoaded = snap.landDeals;
+  if (snap.planning && typeof snap.planning === 'object') w.planningLoaded = snap.planning;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

@@ -3,7 +3,7 @@ import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } f
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, LAND_TUNING, landCost, spendableMoney, TICKS_PER_DAY, TICK_MS, seasonOf, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  refuseGradeOf, boundaryImpact, boundaryRefusal, boundarySummary, type BoundaryImpact,
+  refuseGradeOf, boundaryImpact, boundaryRefusal, boundarySummary, type BoundaryImpact, planImpact, type PlanImpact,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -33,6 +33,8 @@ import { RoadTool } from './roadtool';
 import { RoadClassPicker } from './roadpicker';
 import { StreetRuleTool, StreetRulePicker } from './streetrules';
 import { TrafficPanel } from './trafficpanel';
+import { PlanningPanel } from './planning';
+import { PlanningSigns } from './render/planningSigns';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView, setLandmarkSpans } from './render/bridges';
@@ -462,6 +464,21 @@ const trafficPanel = new TrafficPanel({
   limit: (x, y, on) => net.send({ t: 'gatewayLimit', x, y, on }),
 });
 net.on('trafficPanel', (m) => trafficPanel.show(m.info));
+// planning notices and the residents' vote (planning.ts, docs/multiplayer-land.md M5): the panel, its chip and the site markers
+const planningPanel = new PlanningPanel({
+  me: () => world.me,
+  nameOf: (id) => (id === 'sys' ? 'the Commons' : world.players.get(id)?.name ?? id),
+  tick: () => liveTick(),
+  jump: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(rig.dist, 40); },
+  act: (id, act, extra) => net.send({ t: 'planningAct', id, act, ...extra }),
+});
+const planningSigns = new PlanningSigns();
+scene.add(planningSigns.group);
+net.on('planning', (m) => { planningPanel.set(m.apps, m.votes === true); planningSigns.set(m.apps); });
+// a protected public road the bulldozer was refused (M3): offer a closure notice its dependents may object to
+net.on('closureOffer', (m) => {
+  if (window.confirm(`${m.why}.\n\nGive a closure notice instead? The mayors who depend on it get a game day to object; if nobody does, the road is taken up.`)) net.send({ t: 'closureNotice', tiles: m.tiles });
+});
 // the congestion overlay's explanation (R5): why each held-up road is slow, per chunk, asked for only while hovering with it on
 const jamWhy = new Map<string, { at: number; u: number[] }>();
 let jamAsked = '';
@@ -1251,6 +1268,16 @@ function refuseImpactAt(kind: number, x: number, y: number): BoundaryImpact | nu
   impactMemo = { key, v };
   return v;
 }
+let planMemo: { key: string; v: PlanImpact | null } | null = null;
+/** A nuisance build's planning impact with its door at (x, y) on the loaded parcels (M5, shared/src/planning.ts); null in a sandbox. */
+function planImpactAt(kind: number, x: number, y: number): PlanImpact | null {
+  const key = `${kind}:${x},${y}:${world.parcels.size}`;
+  if (planMemo?.key === key) return planMemo.v;
+  const me = world.parcelAt(x, y)?.owner ?? world.me ?? '';
+  const v = world.sandbox ? null : planImpact(kind, 0, x, y, worldSeed, me, (tx, ty) => world.parcelAt(tx, ty)?.owner ?? null);
+  planMemo = { key, v };
+  return v;
+}
 /** The server's runway rules on the loaded chunks: snap onto a terminal's runway row, check the strip. */
 let runwayMemo: { key: string; at: number; v: RunwayPlan } | null = null;
 function runwayVerdict(line: [number, number][]): RunwayPlan {
@@ -1290,7 +1317,11 @@ function updateStatus() {
       const facing = r === undefined ? '' : ` · door faces ${FRONT_NAMES[r]} (${rot === undefined ? 'auto' : 'chosen'}; Z/C turn)`;
       s += v.ok ? ` · click to place${facing}` : ` · ${v.reason}${facing}`;
       const rk = structureTool(input.tool), rp = v.placed;
-      if (v.ok && rp && refuseGradeOf(rk)) { const b = refuseImpactAt(rk, rp.doorX, rp.doorY); if (b) s += ` · ${boundarySummary(b)}`; }
+      if (v.ok && rp && refuseGradeOf(rk)) {
+        const b = refuseImpactAt(rk, rp.doorX, rp.doorY); if (b) s += ` · ${boundarySummary(b)}`;
+        const pi = planningPanel.votes ? planImpactAt(rk, rp.doorX, rp.doorY) : null; // M5: over the planning threshold, the click files it for a vote
+        if (pi && pi.needs.length && !pi.over.length) s += ` · goes to planning: residents near ${[...pi.owners.keys()].map((o) => world.players.get(o)?.name ?? o).join(', ')} vote over a game day (add conditions or an offer in the Planning panel)`;
+      }
     }
     if (input.tool === 'rail') s += rail.status(input.railPath);
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);

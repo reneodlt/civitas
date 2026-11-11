@@ -16,7 +16,9 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from './constants';
  * `id`, and a death story names the deceased (`dead`, docs/remembrance.md); the Piccadilly Lights' news turn reads the newest headline (client news.ts `latest`).
  */
 
-export type StoryKind = 'fire' | 'explosion' | 'rank' | 'milestone' | 'opening' | 'line' | 'death';
+export type StoryKind = 'fire' | 'explosion' | 'rank' | 'milestone' | 'opening' | 'line' | 'death'
+  /** planning notices, votes and road closures (docs/multiplayer-land.md M5, server sim/planning.ts) */
+  | 'planning';
 
 /** One story as the server keeps and sends it (message `news`). Ticks are world ticks. */
 export interface StoryDTO {
@@ -61,7 +63,7 @@ export const NEWS = {
    * game hours a story stays live: it gets its end when it breaks, t plus these, except a fire and an explosion whose fire
    * still burns, which are live until the fire is out (their hours are then only a guard for an end that never came)
    */
-  liveHours: { fire: 12, explosion: 6, rank: 4, milestone: 2, opening: 3, line: 3, death: 8 } as Record<StoryKind, number>,
+  liveHours: { fire: 12, explosion: 6, rank: 4, milestone: 2, opening: 3, line: 3, death: 8, planning: 6 } as Record<StoryKind, number>,
   /** the showcase's fire drill relights every hour or so: one story per drill home a game day, not one per drill */
   drillDedupeTicks: TICKS_PER_DAY,
 };
@@ -208,6 +210,22 @@ export const HEADLINES = {
     (w: StoryWords) => `${w.what} opens in ${w.place}`,
     (w: StoryWords) => `First service on ${w.what}`,
   ],
+  /** planning (M5): `town` the applicant's ("Ada's town"), `what` the plan ("an open tip"), `n` the votes for, `place` where */
+  planFiled: [
+    (w: StoryWords) => `${w.town} applies to build ${w.what} by ${w.place}: residents to vote`,
+    (w: StoryWords) => `Planning notice: ${w.what} proposed near ${w.place}`,
+  ],
+  planApproved: [
+    (w: StoryWords) => `Residents back ${w.what} near ${w.place}`,
+    (w: StoryWords) => `Plans for ${w.what} by ${w.place} approved`,
+  ],
+  planRefused: [
+    (w: StoryWords) => `Residents throw out ${w.what} near ${w.place}`,
+    (w: StoryWords) => `Plans for ${w.what} by ${w.place} refused after a vote`,
+  ],
+  closureFiled: [(w: StoryWords) => `${w.town} gives notice to close a road near ${w.place}`],
+  closureDone: [(w: StoryWords) => `Road near ${w.place} closed: no objections`],
+  closureBlocked: [(w: StoryWords) => `Road closure near ${w.place} stopped by an objection`],
 };
 export type HeadlineSet = keyof typeof HEADLINES;
 /** The headline of a story with this id from a template set. */

@@ -312,6 +312,9 @@ export class World {
   /** the news (sim/news.ts): what to save, set by the News module; and what a loaded snapshot carried, taken once by it */
   newsSave: (() => NewsSave) | null = null;
   newsLoaded: NewsSave | null = null;
+  /** planning (sim/planning.ts, docs/multiplayer-land.md M5): what to save (null: nothing), set by the Planning module; and what a loaded snapshot carried */
+  planningSave: (() => object | null) | null = null;
+  planningLoaded: object | null = null;
   /** death and remembrance (sim/death.ts): what to save, set by the Death module; and what a loaded snapshot carried, taken once by it */
   deathSave: (() => DeathSave) | null = null;
   deathLoaded: DeathSave | null = null;

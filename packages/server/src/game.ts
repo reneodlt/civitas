@@ -13,6 +13,7 @@ import { Issues } from './sim/issues';
 import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
 import { News } from './sim/news';
+import { Planning } from './sim/planning';
 import { Utilities } from './sim/utilities';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
@@ -54,6 +55,8 @@ export interface Game {
   adverts: Adverts;
   /** the news story log (sim/news.ts, docs/media.md): stories from fires, ranks, openings and new lines, and who covers them */
   news: News;
+  /** planning notices, the residents' vote and road closure notices (sim/planning.ts, docs/multiplayer-land.md M5) */
+  planning: Planning;
   /** utilities (sim/utilities.ts, docs/utilities.md): the power networks, the hourly solve, bills, faults and repair vans */
   utilities: Utilities;
   net: Net;
@@ -126,6 +129,11 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   if (net.ranks) net.ranks.onStory = (e) => news.rank(e);
   world.onSiteCompleted = (s) => news.opened(s);
   net.news = news;
+  // planning (sim/planning.ts, docs/multiplayer-land.md M5): votes on nuisance builds in a shared world (cfg.planning to force);
+  // closure notices for protected public road wherever road protection applies (not in a sandbox)
+  const planning = new Planning(world, sim, (cfg.planning ?? land.market) && !cfg.sandbox && !cfg.spectate);
+  planning.news = news;
+  net.planning = planning;
   // death and remembrance (sim/death.ts, docs/remembrance.md): a fire or blast harms the people inside, an incident's dead make
   // the news, the dead waiting for burial space badge their mortuary
   fires.onHarm = (e) => sim.death.harm(e);
@@ -139,6 +147,8 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   sim.powerGate = (b, target) => utilities.mayGrow(b, target);
   // the land market (sim/landdeals.ts, M7): covenants cap growth before the power gate; a parcel changing hands re-reaches the utilities
   const deals = new LandDeals(world);
+  // land with an open planning application on it is not sold or leased until the vote (M5 with M7)
+  deals.canTransfer = (q) => (planning.openIn(q.x, q.y, q.w, q.h) ? 'That land has a planning application open; sell it once the vote is in' : null);
   deals.sandbox = cfg.sandbox; deals.market = land.market;
   deals.onTransfer = () => utilities.invalidate();
   { const gate = sim.powerGate; sim.powerGate = (b, target) => deals.mayGrow(b, target) && gate(b, target); }
@@ -153,9 +163,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const perf = sim.perf;
   net.perf = perf;
-  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

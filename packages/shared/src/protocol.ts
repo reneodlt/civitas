@@ -12,6 +12,7 @@ import type { SeaGate } from './waterways';
 import type { FireDTO } from './fires';
 import type { AdTarget, AdsDTO } from './adverts';
 import type { StoryDTO } from './news';
+import type { PlanAppDTO } from './planning';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 import type { UtilityInfo, UtilLinkDTO } from './utilities';
 import type { Covenant, LandDealMsg, DealsView } from './landdeals';
@@ -79,13 +80,16 @@ export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builder
   /** M4 (docs/multiplayer-land.md section 5): the landfill levy a refuse site pays, and what a cleaner grade sells (materials, gas, power) */
   | 'levy' | 'recycling'
   /** M7 (docs/multiplayer-land.md section 7): land sold to another player (the buyer's side is `land`), and lease rent paid and received */
-  | 'landsale' | 'rent';
+  | 'landsale' | 'rent'
+  /** M5 (docs/multiplayer-land.md section 6): community offers made on planning applications, held and paid out to the affected owners */
+  | 'planning';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
   adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
   grant: 'Charter grants and rewards', landtax: 'Empty-land tax', other: 'Other', levy: 'Landfill levy', recycling: 'Recycling, gas and power sales',
   landsale: 'Land sales', rent: 'Land rent',
+  planning: 'Planning offers',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -107,6 +111,7 @@ export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', roads: 'running', interest: 'running', bills: 'running', fuel: 'running',
   funeral: 'running', burial: 'running', adrent: 'running', landtax: 'running', levy: 'running', recycling: 'running', rent: 'running',
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff', landsale: 'oneoff',
+  planning: 'oneoff',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
 export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
@@ -630,7 +635,9 @@ export type ClientMsg =
       /** bulldoze in the underground view: fill unused tunnel instead of clearing the surface (docs/underground.md) */
       under?: true;
       /** the road tool (shared/src/roadtool.ts): the class to lay (0, a street, until R3), and whether the player agreed to demolish the buildings in the way (otherwise the road goes round them) */
-      cls?: number; demolish?: boolean }
+      cls?: number; demolish?: boolean;
+      /** a nuisance build that goes to planning (docs/multiplayer-land.md M5): conditions (add-on ids) and a community offer filed with it */
+      plan?: { conditions?: string[]; offer?: number } }
   /** the road tool's Ctrl/Cmd+Z: take back the player's last road drag (ROAD_UNDO_MS), refunded, while its tiles are still bare road */
   | { t: 'undoRoad' }
   /**
@@ -646,6 +653,13 @@ export type ClientMsg =
   | { t: 'gatewayLimit'; x: number; y: number; on: boolean }
   /** fit or remove an add-on at the refuse site whose door is (x, y) (docs/multiplayer-land.md M4, shared/src/refuse.ts REFUSE_ADDONS) */
   | { t: 'refuseAddon'; x: number; y: number; addon: string; on: boolean }
+  /**
+   * M5 planning (shared/src/planning.ts): act on application `id`: `object` to a road closure notice (an affected mayor),
+   * `withdraw` it (the applicant: everything held comes back), or `amend` it (the applicant: add conditions, raise the offer)
+   */
+  | { t: 'planningAct'; id: number; act: 'object' | 'withdraw' | 'amend'; conditions?: string[]; offer?: number }
+  /** M5: give notice to close these protected public road tiles (after a `closureOffer`); the mayors who depend on them may object */
+  | { t: 'closureNotice'; tiles: [number, number][] }
   /** R5: the Traffic panel's figures (answered with 'trafficPanel'); asked again every few seconds while it is open */
   | { t: 'trafficPanel' }
   /** R5: why the traffic in chunk (cx, cy) is held up (answered with 'jamWhy'); asked only while the congestion overlay is on */
@@ -790,6 +804,10 @@ export type ServerMsg =
   | ({ t: 'ads' } & AdsDTO)
   /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */
   | { t: 'news'; s: StoryDTO[]; all?: boolean }
+  /** M5 planning: every open application and those decided lately, sent on joining and whenever the list changes */
+  | { t: 'planning'; apps: PlanAppDTO[]; /** votes on nuisance builds are on (a shared world); closure notices work either way */ votes?: boolean }
+  /** M5: a bulldoze of protected public road was refused (the toast says why); the client may offer a closure notice for these tiles */
+  | { t: 'closureOffer'; tiles: [number, number][]; why: string }
   /** every resting place's filled plots and the funerals under way (shared/src/remembrance.ts), on join and when they change */
   | { t: 'graves'; list: GraveSiteDTO[] }
   /** a deceased person's panel (answer to inspectDeceased); null when nobody of that id is remembered */

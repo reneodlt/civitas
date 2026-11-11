@@ -189,6 +189,18 @@ export class PublicRoads {
   }
 
   /**
+   * Who depends on these public road tiles (other than `actor`): the owners removing them would cut off, and the owners
+   * whose traffic used them within the adoption window. A closure notice (M5, sim/planning.ts) goes to these mayors.
+   */
+  dependents(tiles: readonly (readonly [number, number])[], actor: string): string[] {
+    const walls = new Set<number>();
+    for (const [x, y] of tiles) walls.add(tkey(x, y));
+    const out = new Set(this.cutOff(walls, actor)), day = this.w.day;
+    for (const k of walls) { const u = this.w.publicRoads.get(k)?.u; if (u) for (const id in u) if (id !== actor && u[id] > day - 1 - T.adoptWindow) out.add(id); }
+    return [...out].sort();
+  }
+
+  /**
    * The owners (other than `actor`; everyone with null) whose land reaches a gateway along roads now and would not with
    * the road tiles `walls` gone. Candidates are the owners beside the tiles and beside any piece of road the removal
    * leaves with no gateway; each is confirmed with a bounded search from all the roads in and around their land.

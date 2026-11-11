@@ -789,3 +789,122 @@ parcels:check, land:check, finance:check, roadrules:check and refuse:check pass.
 - Leases return the land with its buildings, never the book-value buy-out; there is no early surrender.
 - Pacts share no cost; the strip is a rectangle on the two parcels, offered by the client as a band along the edge.
 - Transfers are between players only: no auction, no regional buyer, no self-assessed prices (decision 4 stays held back).
+
+## Built: M5 planning (2026-11-11)
+
+Section 6's notices, the frozen roll, the vote, conditions, the community offer, refusal and cooling-off, and M3's
+closure notices. Code: `shared/src/planning.ts` (`PLANNING` tuning, the source list, `planImpact`, `withPlan`, the DTO;
+browser-safe), `server/src/sim/planning.ts` (`Planning`, one per game, made by `game.ts` and ticked with the systems),
+the hooks in `server/src/net.ts` (`placeStructure`, `refuseAddon`, the bulldozer, `planningAct`, `closureNotice`),
+`News.planning` (`sim/news.ts`, story kind `planning`), `PublicRoads.dependents`, the client's `planning.ts` (panel and
+chip) and `render/planningSigns.ts` (site markers). Check: `npm run planning:check` (`server/src/planning-check.ts`).
+
+**Where it applies.** Votes on nuisance builds run on a shared world: `GameConfig.planning`, which defaults to `market`
+(M2) and is never on in a sandbox or a showcase. Closure notices work wherever M3's road protection does (any world but a
+sandbox), since that is where a protected road can block someone.
+
+**What needs planning.** `PLANNING_SOURCES` lists the nuisance buildings with their emission at full use, their jobs and
+the add-ons they may take as conditions: the five refuse grades for now; industry kinds, plants and late venues join the
+list once they are placed buildings with a full-use emission. `planImpact` spreads that emission with the world's M1
+kernels (as M4's `boundaryImpact`) and keeps (a) the impact zone, every 4×4 cell where some nuisance reaches `zoneMin`
+(4%) whoever owns it, and (b) the worst of each kind on land of owners other than the builder. A build is filed for
+planning when some kind on others' land is over `threshold` (0.4) × its boundary limit while none is over the limit (over
+a limit it is still refused outright, M4). Impact only on the builder's own or unclaimed land needs no vote. On the
+check's world (seed 4242) a tip is over the limit within about 30 tiles of a neighbour downwind, goes to planning at 36-42
+tiles and is free beyond about 45; a composting site needs planning within about 16 tiles; a recycling centre with
+screening only right at the boundary. Taking a refuse site's add-on off (`refuseAddon`) that raises an over-threshold
+kind on others' land is filed the same way (kind `addon`); on approval the add-on comes off.
+
+**The application.** The click files instead of placing: the building's cost and its conditions' cost (as `build`) and
+the community offer (as the new ledger line `planning`, "Planning offers") are taken at filing and held, so a player
+cannot file more than they can pay for. The site's footprint is reserved (nothing else may be built or zoned on it until
+the vote); the client draws a notice board at the door and pegs out the footprint. Each affected mayor gets a toast
+("Planning notice: Ada plans an open tip near your land (smell and smoke up to 27%). 38 residents vote at the end of a
+game day"), the applicant is told what is held, and the news runs a `planFiled` story. The notice is `noticeTicks`, one
+game day. The roll is frozen at filing as an id array: every resident who is not a child and not migrating whose home is
+in the impact zone, of every owner (the applicant's own residents included). A build may carry conditions and an offer
+from the start (`build` message `plan: { conditions, offer }`); conditions also count for the boundary-limit check, so a
+landfill over the limit bare may be filed with an enclosure.
+
+**During the notice.** The applicant may amend (`planningAct` `amend`): add conditions or raise the offer; the extra is
+taken and held, the true impact is recomputed, the roll stays as it was. They may withdraw (everything back, no
+cooling-off). Nothing else changes the vote; campaigns on plans are M6.
+
+**The vote** (`Planning.vote`, at the end of the notice), for each voter still in town:
+
+- own impact: `impactGain` (4) × ln(value after / value before) at their home's cell, with their household's weights
+  (`Motivation.weightsOf` → `valueWeights` → `combineValue`, M1); "after" adds the plan's intensities at full use to the
+  cell's bytes the way the field combines nuisances (1 − (1 − a)(1 − b)), quiet falling with the new noise and traffic;
+- belief: `beliefGain` × a belief in −1..1 kept per application per voter (`Planning.believe`, the `plan` belief target,
+  `BeliefTarget.Plan` in shared; plumbing for M6, nothing sets it yet), plus word of mouth: `wordOfMouth` (0.3) × the mean
+  own impact of the voter's friends on the roll;
+- the offer: `offerGain` (0.8) × sat(offer per household on the roll / $150), bent by the household's Money weight as
+  happiness bends (0.6-1.6);
+- jobs: `jobsGain` (0.25) × min(1, the building's staff / households on the roll), in full for a household with someone
+  out of work, 40% otherwise;
+- a hashed ±0.03 so a vote is not a cliff.
+
+Turnout is `turnoutBase` (0.15) + `turnoutGain` (1.2) × |lean|, × `lossAversion` (1.8) for opponents, at most 95%; whether
+a voter votes is a hash of their id and the application's id, so the same world gives the same result. More yes than no
+among those voting approves; nobody voting (an empty roll) approves.
+
+**Outcomes.**
+
+- *Approved:* placed as a build would be (re-planned on the same door and facing; a site no longer clear lapses with a
+  full refund), its conditions fitted as refuse add-ons and kept in `Planning.locks`: `refuseAddon` refuses to take a
+  condition off ("a condition of the planning approval"). The offer is paid to the affected owners, split by their
+  residents on the roll (evenly when none). The news runs `planApproved`.
+- *Refused:* everything held comes back; the applicant may not file anything that needs planning within `nearTiles` (8)
+  of the door for `coolTicks` (2 game days), and until `rememberTicks` (10 days) only a design whose impact score (the sum
+  over kinds of worst / limit on others' land) is under `changedBy` (90%) of the refused one: a cleaner grade, add-ons or
+  more distance. Screening on a tip is not enough; a lined landfill with an enclosure (0.16 against the tip's 0.78) is. A
+  build under the threshold (a composting site at the same door) needs no vote at all. The news runs `planRefused`.
+- Everyone involved gets a toast with the count ("Refused: 0 for, 21 against, 21 of 38 voting"). Decided applications
+  stay in the list and on the panel for `showDecidedTicks` (6 game hours).
+
+**Road closure notices.** A bulldoze refused by M3's protection now also sends the client a `closureOffer` with the
+public road tiles; the client asks "Give a closure notice instead?" and sends `closureNotice`. The mayors who depend on
+the road (`PublicRoads.dependents`: whom it would cut off, and whose traffic used it in the adoption window) get a toast
+and may `object` in the panel within the notice. An objection stops it at once, and the closer may not give notice on
+those tiles again for `coolTicks`; silence lets it through: at the end of the notice the tiles still public road are taken
+up (a bridge deck takes its span).
+
+**Client.** A "Planning · n" chip shows while an open application is the player's or reaches their land (or their road)
+and opens the panel: each application's site (a link), who filed it, the voters on the roll, its impact on others' land
+per kind against the limit, time left, conditions, offer and, once decided, the result; the applicant's buttons add a
+condition (with its cost), raise the offer or withdraw; an affected mayor's button objects to a closure. Placing a refuse
+site whose ghost passes the limits says "goes to planning: residents near Bob vote over a game day" on the status line.
+The welcome is unchanged: the `planning` message says whether votes are on (`votes`).
+
+**Persistence.** The optional snapshot field `planning`: applications (with their rolls, conditions, offers, held money,
+beliefs and results), refused designs and conditions of approved sites. Impact zones are recomputed on load. A save
+without it loads with none, and a world with nothing to keep saves without the field.
+
+**Measured.** planning:check, all pass: a tip 36 tiles from Bob's land (smell 27% against a limit of 35%) is filed, not
+placed, $1,500 held, 38 residents of Bob and Cy on the roll; 21 of them vote, all against; refunded in full; refiling at
+once is refused (cooling-off), unchanged after it too; a composting site at the same door is placed at once. A lined
+landfill 24 tiles off is over the limit bare (score 1.03), filed with an enclosure (0.47) and amended with screening
+(0.42): approved, placed with both fitted, and the screening cannot come off. A recycling centre 10 tiles off: without an
+offer 0 for, 22 against; with $1,000 (raised during the notice) 9 for, 3 against: approved, Bob paid $818 and Cy $182. A
+tip in the middle of a 100×100 outpost is placed with no vote. A home built during a notice is not on its roll. The same
+scene votes identically voter by voter. A save round trip keeps an open application's roll, end and offer, the
+conditions and the refused design. Closure: Bob objects and the road stays (and Ada cannot give notice again at once);
+after the cooling-off nobody objects and a game day later the two tiles are gone. Cost: filing walks the citizens once
+(the roll) and spreads one kernel; the vote walks the roll; per tick only the open applications' end ticks are looked at.
+refuse:check, value:check, roadrules:check, land:check and finance:check still pass; the motivation loadtest passes 29 of
+29.
+
+**Differences from the design.**
+
+- Only the refuse grades need planning; industry still grows from zoning, so it has no full-use emission to judge.
+- The community offer is cash only (no park commitment, cheaper service or shorter hours as a promise); shorter hours
+  and screening are conditions instead. The offer is paid on approval and refunded with the rest on refusal.
+- Money is held at filing rather than charged on approval: a refused or withdrawn plan costs nothing but time.
+- Beliefs about a plan are a per-application map on the server, not motivation's general belief store (which is not
+  built yet); word of mouth is computed at the vote from friends on the roll, not spread day by day.
+- An empty roll approves: a nuisance near a neighbour's land with nobody living in the zone needs no residents' consent
+  (the boundary limits still apply). Owners have no vote of their own on building plans; they object only to closures.
+- Conditions are only ever added during a notice; the impact may fall below the threshold meanwhile, and the plan still
+  goes to its vote.
+- A closure objection decides the notice at once rather than at its end; the closure marker tints only its first tile.
+- The site is reserved against building and zoning; a road laid over it meanwhile makes the approved plan lapse (refunded).
