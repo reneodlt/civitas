@@ -1,6 +1,6 @@
 import {
   LAND_TUNING, TICKS_PER_DAY, CHUNK_SIZE, VALUE_CELL, VALUE_CELLS, Zone, isBuildable, isRoad, zoneOf, packTile, terrainOf, underConstruction, isCivicId, levelOf,
-  landPriceBytes, landPriceOf, priceOfByte, wildPriceByte, tileKey, u8ToB64,
+  landPriceBytes, landPriceOf, priceOfByte, wildPriceByte, tileKey, u8ToB64, floodRiskAt, floodPriceMul,
 } from '@msimcity/shared';
 import { tkey, type World, type Parcel } from '../world';
 import type { ValueField } from './value';
@@ -61,13 +61,15 @@ export class LandMarket {
   /** The `landPrice` message's payload for a chunk: base64, '' for the wild price. */
   priceMsg(cx: number, cy: number): string { return this.entry(cx, cy).d; }
   /** The price of a rectangle, as the client works it out from the same bytes. */
-  priceOf(r: { x: number; y: number; w: number; h: number }): number { return landPriceOf(r, (cx, cy) => this.priceBytes(cx, cy)); }
+  priceOf(r: { x: number; y: number; w: number; h: number }): number { return landPriceOf(r, (cx, cy) => this.priceBytes(cx, cy), this.riskMul); }
+  /** flood risk lowers a tile's price (docs/weather.md W6, shared/src/severe.ts): the client's preview passes the same */
+  readonly riskMul = (x: number, y: number) => floodPriceMul(floodRiskAt(this.w.seed, x, y));
   /** One tile's current price (dollars, unrounded). */
   tilePrice(x: number, y: number): number {
     const cx = Math.floor(x / CHUNK_SIZE), cy = Math.floor(y / CHUNK_SIZE), b = this.priceBytes(cx, cy);
-    if (!b) return priceOfByte(wildPriceByte());
+    if (!b) return priceOfByte(wildPriceByte()) * this.riskMul(x, y);
     const lx = Math.floor((x - cx * CHUNK_SIZE) / VALUE_CELL), ly = Math.floor((y - cy * CHUNK_SIZE) / VALUE_CELL);
-    return priceOfByte(b[ly * VALUE_CELLS + lx]);
+    return priceOfByte(b[ly * VALUE_CELLS + lx]) * this.riskMul(x, y);
   }
 
   // ---- what is on the land -----------------------------------------------------------------------------

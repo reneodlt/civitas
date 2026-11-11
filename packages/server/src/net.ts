@@ -34,6 +34,7 @@ import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { LandMarket } from './sim/land';
 import type { LandDeals } from './sim/landdeals';
 import type { Contracts } from './sim/contracts';
+import type { Severe } from './sim/severe';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
@@ -41,7 +42,7 @@ import type { News } from './sim/news';
 import { buildCost, type Planning } from './sim/planning';
 import type { Utilities } from './sim/utilities';
 import { Overlays } from './overlays';
-import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
+import { ISSUE_TUNING, isOverlayChannel, Issue } from '@msimcity/shared';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -163,6 +164,8 @@ export class Net {
   deals: LandDeals | null = null;
   /** service contracts (sim/contracts.ts, docs/multiplayer-land.md M8): tariffs, contracts, road access, hourly bills; set by game.ts */
   contracts: Contracts | null = null;
+  /** severe weather (sim/severe.ts, docs/weather.md W6): warnings, fallen trees, floods, flood walls, gritters; set by game.ts */
+  severe: Severe | null = null;
   private get market() { return !!this.land?.market; }
   /** the value field's version when the land prices were last looked at (flushLand) */
   private landVer = -1;
@@ -311,6 +314,7 @@ export class Net {
       case 'overlay': return this.setOverlay(c, Number(m.ch));
       case 'adCampaign': case 'adRent': case 'adEnd': return this.advert(c, m);
       case 'utilLink': case 'utilNode': return this.utility(c, m);
+      case 'floodWall': return this.floodWall(c, m);
     }
   }
 
@@ -427,6 +431,7 @@ export class Net {
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     if (this.deals) this.send(c, { t: 'deals', ...this.deals.view(c.player.id) });
     if (this.contracts) this.send(c, { t: 'services', ...this.contracts.view(c.player.id) });
+    if (this.severe) this.send(c, this.severe.msg());
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
     if (this.planning) this.send(c, { t: 'planning', apps: this.planning.dtos(), ...(this.planning.on ? { votes: true } : {}) });
     this.send(c, { t: 'graves', list: this.sim.death.graves() });
@@ -595,6 +600,19 @@ export class Net {
     }
     const r = u.setNode(p, x, y, { ...(typeof m.protect === 'boolean' ? { protect: m.protect } : {}), ...(typeof m.importOn === 'boolean' ? { importOn: m.importOn } : {}) });
     if (r) this.toast(c, r, /^(That|Not)/.test(r) ? 'error' : 'info');
+  }
+
+  /** Flood defences (sim/severe.ts, docs/weather.md W6): a drag of wall along a bank, or a click to take one down. */
+  private floodWall(c: Client, m: Extract<ClientMsg, { t: 'floodWall' }>) {
+    if (!this.severe) return this.toast(c, 'No severe weather on this server');
+    const tiles: [number, number][] = [];
+    for (const pair of Array.isArray(m.tiles) ? m.tiles.slice(0, 2 * 160 + 1) : []) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (Number.isFinite(x) && Number.isFinite(y)) tiles.push([x, y]);
+    }
+    if (!tiles.length) return;
+    const r = this.severe.wall(c.player!, tiles, !!m.remove, this.cfg.sandbox);
+    this.toast(c, r, /^(Flood wall (built|taken))/.test(r) ? 'info' : 'error');
   }
 
   /** Pylons or buried cable (sim/utilities.ts lay): a drag from a plant or node to another. */
@@ -1764,6 +1782,9 @@ export class Net {
     // service contracts (sim/contracts.ts, M8): the same, each client its view (tariffs, its contracts) and the parties' notices
     if (this.contracts?.changed) { this.contracts.changed = false; for (const c of this.clients) if (c.player && c.conn.open) this.send(c, { t: 'services', ...this.contracts.view(c.player.id) }); }
     if (this.contracts?.notices.length) for (const n of this.contracts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
+    // severe weather (sim/severe.ts, W6): fallen trees, floods and walls to everyone; warnings and damage to the owners
+    if (this.severe?.changed) { this.severe.changed = false; this.broadcast(this.severe.msg()); }
+    if (this.severe?.notices.length) for (const n of this.severe.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {
@@ -1936,7 +1957,7 @@ export class Net {
   /** The overlay channel a client wants (0 none): every subscribed chunk is looked at again. */
   private setOverlay(c: Client, ch: number) {
     if (!this.issues) return;
-    c.ovl = Number.isInteger(ch) && ch > 0 && ch < OVERLAY_COUNT ? ch : 0;
+    c.ovl = isOverlayChannel(ch) ? ch : 0;
     c.ovlSent = new Map();
     c.ovlQueue = c.ovl ? [...c.subs] : [];
   }
@@ -1966,6 +1987,7 @@ export class Net {
     }
     this.overlays ??= new Overlays(w, this.sim, is);
     this.overlays.news = this.news;
+    this.overlays.severe = this.severe;
     let budget = OVERLAY_CHUNKS_PER_TICK;
     for (const c of this.clients) {
       const q = c.ovlQueue;

@@ -53,6 +53,7 @@ export * from './ferry';
 export * from './education';
 export * from './weather';
 export * from './weatherfx';
+export * from './severe';
 export * from './value';
 export * from './refuse';
 export * from './planning';

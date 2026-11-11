@@ -221,7 +221,7 @@ export class FleetMeshes {
 
   /** The existing body whose beams, blinker positions and eye height fit a fleet kind (render/citizens.ts tables). */
   static body(kind: number): FleetBody {
-    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire || kind === FleetKind.Hearse ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan || kind === FleetKind.UtilityVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
+    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire || kind === FleetKind.Hearse ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan || kind === FleetKind.UtilityVan || kind === FleetKind.RoadCrew ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper || kind === FleetKind.Gritter ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
   }
   /** Eye height for the first-person view, tile units. */
   static eye(kind: number): number { return kind === FleetKind.Bicycle || kind === FleetKind.Moped ? 0.14 : kind === FleetKind.BinLorry || kind === FleetKind.SchoolBus ? 0.24 : kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 0.16 : 0.21; }
@@ -305,6 +305,16 @@ export class FleetMeshes {
         if (working) { this.flash(id, now, 0.02, 0.2, 0); at(this.person, HIVIS, -0.05, 0, 0.2 + 0.03 * hash2(id, 13), Math.PI / 2); }
         return;
       }
+      case FleetKind.Gritter:
+        // a gritter (docs/weather.md W6): the lorry in council orange, a fresher or more weathered coat each, its beacon going all round
+        body(this.lorry, tmpC.setHex(0xf28a1e).multiplyScalar(0.85 + 0.15 * hash2(id, 5)));
+        this.flash(id, now, 0.07, 0.205, 0);
+        return;
+      case FleetKind.RoadCrew:
+        // a road crew's van out to a fallen tree: hi-vis, beacon on and a sawyer at the kerb while they work
+        body(this.van, tmpC.copy(HIVIS).lerp(WHITE, 0.35 + 0.2 * hash2(id, 5)));
+        if (working) { this.flash(id, now, 0.02, 0.2, 0); at(this.person, HIVIS, -0.05, 0, 0.2 + 0.03 * hash2(id, 13), Math.PI / 2); }
+        return;
       case FleetKind.Sweeper:
         body(this.sweeper, tmpC.setHex(hash2(id, 5) < 0.5 ? 0xf2a33a : 0xf5f5f0));
         this.flash(id, now, 0.1, 0.17, 0);

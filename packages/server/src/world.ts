@@ -327,6 +327,9 @@ export class World {
   /** service contracts (sim/contracts.ts, docs/multiplayer-land.md M8): what to save, set by Contracts; and what a loaded snapshot carried */
   contractsSave: (() => ContractsSave | null) | null = null;
   contractsLoaded: ContractsSave | null = null;
+  /** severe weather (sim/severe.ts, docs/weather.md W6): fallen trees, floods, flood defences, gritted roads, warnings; set by Severe, and what a loaded snapshot carried */
+  severeSave: (() => object | null) | null = null;
+  severeLoaded: object | null = null;
   /** why a parcel may not be split, combined, sold back or abandoned now (a lease running on it, sim/landdeals.ts); null: free */
   landLocked: ((id: number) => string | null) | null = null;
   /** fired when builders finish a site (completeSite), after the tile shows the finished building: the news reports openings */

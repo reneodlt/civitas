@@ -59,6 +59,8 @@ import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { Reveal, readPref, writePref } from './reveal';
 import { GOAL_BY_ID } from '@msimcity/shared';
+import { SEVERE, TICKS_PER_HOUR, floodRiskAt, floodsAt, severeOutlook, warningText } from '@msimcity/shared';
+import { SevereView } from './render/severe';
 import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
 import { NewsUI, news } from './news';
@@ -335,6 +337,7 @@ ui.roadClassChanged();
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
   worldSeed = m.seed;
+  world.seed = m.seed;
   buildings.rotors.seed = m.seed;
   tv.worldSeed = m.seed;
   weather.reset();
@@ -476,6 +479,10 @@ const planningPanel = new PlanningPanel({
 const planningSigns = new PlanningSigns();
 scene.add(planningSigns.group);
 net.on('planning', (m) => { planningPanel.set(m.apps, m.votes === true); planningSigns.set(m.apps); });
+// severe weather (docs/weather.md W6): fallen trees closing roads, floodwater, flood walls (render/severe.ts)
+const severeView = new SevereView();
+scene.add(severeView.group);
+net.on('severe', (m) => severeView.set(m));
 // a protected public road the bulldozer was refused (M3): offer a closure notice its dependents may object to
 net.on('closureOffer', (m) => {
   if (window.confirm(`${m.why}.\n\nGive a closure notice instead? The mayors who depend on it get a game day to object; if nobody does, the road is taken up.`)) net.send({ t: 'closureNotice', tiles: m.tiles });
@@ -774,6 +781,8 @@ const input = new Input(canvas, rig, {
   onBuild: (tool, tiles) => {
     // a click (not a drag) with a link tool takes down the line through that tile (docs/utilities.md 4.2)
     if ((tool === 'pylons' || tool === 'cable') && tiles.length < 2) { if (tiles[0]) net.send({ t: 'utilLink', op: 'remove', x: tiles[0][0], y: tiles[0][1] }); return; }
+    // flood defences (docs/weather.md W6): a drag builds wall along it, a click takes the one there down
+    if (tool === 'floodwall') { if (tiles.length) { net.send({ t: 'floodWall', tiles, ...(tiles.length < 2 ? { remove: true } : {}) }); audio.ui('place'); } return; }
     const rot = structureTool(tool) ? input.rotationOf(tool) : undefined; // the orientation chosen with Z/C, else the server faces a road itself
     net.send({ t: 'build', tool: tool as Tool, tiles, ...(rot !== undefined ? { rot } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
     audio.ui('place');
@@ -1325,6 +1334,10 @@ function updateStatus() {
       }
     }
     if (input.tool === 'rail') s += rail.status(input.railPath);
+    if (input.tool === 'floodwall') {
+      const n = input.railPath?.length ?? 0, r = floodRiskAt(worldSeed, x, y);
+      s += n > 1 ? ` · ${n} tiles of flood wall, $${(n * SEVERE.wallCost).toLocaleString()} · release to build` : ` · flood risk here ${Math.round(r * 100)}% · drag along the bank on your own empty land; holds the water until the river is ${Math.round(SEVERE.wallHold * 100)}% up; click a wall to take it down`;
+    }
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
@@ -1344,6 +1357,11 @@ function updateStatus() {
     s = !world.market ? `${r.w}×${r.h} tiles = $${bc.cost.toLocaleString()}`
       : bc.homestead && bc.cost === 0 ? `${r.w}×${r.h} tiles: your homestead, free (worth $${bc.price.toLocaleString()})`
         : `${r.w}×${r.h} tiles = $${bc.cost.toLocaleString()} (about $${(bc.price / (r.w * r.h)).toFixed(2)} a tile by the neighbourhood's value${bc.homestead ? `; the first ${bc.homestead}×${bc.homestead} free` : ''})`;
+    { // flood risk (docs/weather.md W6): how much of it floods, and the price it took off
+      let risky = 0, top = 0;
+      for (let yy = r.y; yy < r.y + r.h; yy++) for (let xx = r.x; xx < r.x + r.w; xx++) { const k = floodRiskAt(worldSeed, xx, yy); if (k > 0) { risky++; if (floodsAt(k, 0.5)) top++; } }
+      if (risky) s += ` · flood risk: ${risky} of ${r.w * r.h} tiles by the water${top ? ` (${top} flood in a bad spell)` : ''}${world.market ? ', priced lower' : ''}`;
+    }
     if (!verdict.ok) s += ` · ${verdict.reason}`;
     else if (world.myPlayer?.fin?.admin !== undefined) s += ' · in administration';
     else if (world.myPlayer && spendableMoney(world.myPlayer.money, world.myPlayer.devUnlimited) < bc.cost) s += ' · not enough money, even with the overdraft';
@@ -1516,6 +1534,15 @@ let last = performance.now();
 let vehTick = 0, vehAt = performance.now();
 const weatherChip = document.getElementById('weather')!;
 let chipShown = '';
+/** The weather chip with a warning badge while a storm or flood spell is under way or due within a game day (docs/weather.md W6). */
+let warnMemo: { h: number; seed: number; lines: string[] } | null = null;
+function severeChip(c: { text: string; title: string }): { text: string; title: string; warn: boolean } {
+  const tick = liveTickF(), h = Math.floor(tick / TICKS_PER_HOUR);
+  if (!warnMemo || warnMemo.h !== h || warnMemo.seed !== worldSeed) warnMemo = { h, seed: worldSeed, lines: severeOutlook(worldSeed, tick).map((e) => warningText(e, h)) };
+  const lines = warnMemo.lines;
+  if (!lines.length) return { ...c, warn: false };
+  return { text: `⚠ ${c.text}`, title: `${lines.join('\n')}\n\n${c.title}`, warn: true };
+}
 function frame(now: number) {
   requestAnimationFrame(frame);
   perf.frame(now);
@@ -1532,8 +1559,8 @@ function frame(now: number) {
   weather.focus.set(rig.target.x, rig.target.z); weather.dist = rig.dist; weather.fpvCamera = fpv.camera;
   weather.enabled = underground.level < 0.5 && !fpv.tunnelOn;
   weather.update(dt, liveTickF(), now);
-  const chip = weather.chip;
-  if (chip.title !== chipShown) { chipShown = chip.title; weatherChip.textContent = chip.text; weatherChip.title = chip.title; }
+  const chip = severeChip(weather.chip);
+  if (chip.title !== chipShown) { chipShown = chip.title; weatherChip.textContent = chip.text; weatherChip.title = chip.title; weatherChip.classList.toggle('warn', chip.warn); }
   perf.lap('weather');
   // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D
   if (!mapMode.on && rig.overZoom > 0.3 && !tour?.flying) mapMode.set(true);

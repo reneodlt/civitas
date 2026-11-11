@@ -106,6 +106,8 @@ const SLIP_GAP_SPEED = 1.25;
 const FAST_PACE = 0.7;
 /** The furthest ahead (tiles) a fast car looks along its route: its stopping distance at the top pace is about 6. */
 const HORIZON_MAX = 8;
+/** what a road tile closed by severe weather (a fallen tree, a flood: sim/severe.ts) adds to its cost for the routers */
+export const CLOSED_COST = 400;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
 const CROSSING_DELAY = 1.5;
 /** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
@@ -505,6 +507,13 @@ export class Traffic {
    * (no rail) leaves every crossing open.
    */
   barrier: ((x: number, y: number) => boolean) | null = null;
+  /**
+   * Road tiles closed by severe weather (sim/severe.ts, docs/weather.md W6: a fallen tree, floodwater), as tile keys:
+   * the routers price them at CLOSED_COST, so new routes go round them while any way round exists.
+   */
+  readonly closures = new Set<number>();
+  /** this world's gritted road tiles (sim/severe.ts sets it, and ROAD_WEATHER.gritted for the shared readers); null: ROAD_WEATHER's */
+  gritted: ((x: number, y: number) => boolean) | null = null;
   /** pedestrians on the carriageway, by tile: last tick's picture (read) and this tick's (written) */
   // (RoadChunk.xm: CROSS_* masks by tile for this tick and the one before, in slots by the tick's presStamp)
   private phase: SignalPhase = { green: 'ns', amber: false };
@@ -627,6 +636,7 @@ export class Traffic {
     // a level crossing: the expected wait for its barriers. A bascule lifts only a few times a day: nothing, but while it
     // is up, a detour (drivers held at it past the stuck limit re-route round it)
     if (f & 12) c += f & 4 ? CROSSING_DELAY : this.barrierDownAt(x, y) ? BASCULE_UP_COST : 0;
+    if (this.closures.size && this.closures.has(tkey(x, y))) c += CLOSED_COST; // closed by a fallen tree or a flood (W6)
     return c;
   }
   private costChunks = new Map<number, CostChunk>();
@@ -2187,7 +2197,7 @@ export class Traffic {
   private weatherPace(x: number, y: number): number {
     const wx = weatherNow(this.w);
     if (wx.road === 1) return 1;
-    return wx.road === wx.roadGritted || !ROAD_WEATHER.gritted(x, y) ? wx.road : wx.roadGritted;
+    return wx.road === wx.roadGritted || !(this.gritted ?? ROAD_WEATHER.gritted)(x, y) ? wx.road : wx.roadGritted;
   }
   /** What the last leg could not use because it crossed an edge with more than 0.3 of its move left (only a fast car's). */
   private carry = 0;

@@ -26,14 +26,24 @@ const FORCED: Record<ForcedWeather, Partial<Weather> & { speed?: number; gust?: 
 };
 let forced: ForcedWeather | null = null;
 /** Force a condition everywhere (tests and loadtests); null for the real weather. */
-export function setForcedWeather(f: ForcedWeather | null) { forced = f; moodCache.clear(); }
+export function setForcedWeather(f: ForcedWeather | null) { forced = f; moodCache.clear(); forcedGen++; }
 export const forcedWeather = () => forced;
+/**
+ * A scripted spell (W6 checks: a storm or a flood spell a day ahead): `script(tick)` names a condition for that tick, or
+ * null for the forced condition or the real weather. Must be a pure function of the tick. Never set in a live game.
+ */
+let script: ((tick: number) => ForcedWeather | null) | null = null;
+export function setWeatherScript(s: ((tick: number) => ForcedWeather | null) | null) { script = s; moodCache.clear(); forcedGen++; }
+/** bumped whenever the forced weather or the script changes: caches of anything read through weatherFor key on it */
+let forcedGen = 0;
+export const weatherGen = () => forcedGen;
 
 /** The weather the simulation reads: W1's model, or the forced condition. Do not mutate the result. */
 export function weatherFor(seed: number, tick: number): Weather {
   const w = weatherAt(seed, tick);
-  if (!forced) return w;
-  const { speed, gust, ...f } = FORCED[forced];
+  const f0 = (script && script(tick)) || forced;
+  if (!f0) return w;
+  const { speed, gust, ...f } = FORCED[f0];
   return { ...w, ...f, wind: { ...w.wind, speed: speed ?? w.wind.speed, gust: gust ?? w.wind.gust } };
 }
 
@@ -64,7 +74,7 @@ export function roadSpeedMul(w: Weather, gritted = false): number {
   if (w.fog > 0.3) m *= 1 - (1 - WT.speedFog) * clamp01((w.fog - 0.3) / 0.5);
   return m;
 }
-/** Whether a road tile is gritted (W6's gritters fill this in; until then nothing is). */
+/** Whether a road tile is gritted: W6's gritters (server sim/severe.ts) set it; nothing is until a gritter has been along. */
 export const ROAD_WEATHER = { gritted: (_x: number, _y: number) => false };
 
 /** The collision-rate multiplier (>= 1). A hook: no road collisions are simulated yet (docs/incidents.md). */
@@ -129,7 +139,7 @@ const moodCache = new Map<string, { label: string; delta: number } | null>();
  * function of the seed and the hour, memoised; null when the weather is neither.
  */
 export function weatherMood(seed: number, tick: number): { label: string; delta: number } | null {
-  const h = Math.floor(tick / TICKS_PER_HOUR), key = `${seed}|${h}|${forced ?? ''}`;
+  const h = Math.floor(tick / TICKS_PER_HOUR), key = `${seed}|${h}|${forced ?? ''}|${forcedGen}`;
   if (moodCache.has(key)) return moodCache.get(key)!;
   let grey = 0, n = 0;
   for (let k = 0; k < WT.greyHours; k += 3) { n++; if (isGrey(weatherFor(seed, (h - k) * TICKS_PER_HOUR))) grey++; }

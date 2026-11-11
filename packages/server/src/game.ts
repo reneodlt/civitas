@@ -16,6 +16,7 @@ import { News } from './sim/news';
 import { Planning } from './sim/planning';
 import { Utilities } from './sim/utilities';
 import { Contracts } from './sim/contracts';
+import { Severe } from './sim/severe';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -62,6 +63,8 @@ export interface Game {
   utilities: Utilities;
   /** service contracts between players (sim/contracts.ts, docs/multiplayer-land.md M8): tariffs, contracts, road access, hourly bills */
   contracts: Contracts;
+  /** severe weather (sim/severe.ts, docs/weather.md W6): warnings, fallen trees and their crews, floods, flood walls, gritters */
+  severe: Severe;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -164,6 +167,11 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   utilities.contracts = contracts;
   sim.refuse.contracts = contracts;
   net.contracts = contracts;
+  // severe weather (sim/severe.ts, docs/weather.md W6): a fleet service of sim.mobile (crews and gritters from builders' yards),
+  // closing roads (Traffic.closures), keeping flooded people at home (Simulation.stayHome, closedAt), warning and reporting
+  const severe = new Severe(world, sim, sim.mobile);
+  severe.news = news;
+  net.severe = severe;
   if (net.onboarding) net.onboarding.powerHeld = (o) => utilities.heldBack(o);
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
@@ -175,7 +183,7 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   net.perf = perf;
   const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); contracts.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, contracts, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, contracts, severe, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

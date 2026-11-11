@@ -334,3 +334,118 @@ both ways.
   1; a windy world's turbines average a little more than before, a calm one's a little less.
 - Forced weather is per process (`WEATHER`), not per world or GameConfig, to keep net.ts untouched while M5 and M7 work there.
 - Hooks left for W5 and W6: `ROAD_WEATHER.gritted`, `collisionMul`, `gasDemandMul`, `faultMulOf` (storms ×3 now, W6 ×10), `holdReason`.
+
+## Built: W6 (2026-11-11)
+
+Severe weather: storm and flood warnings a game day ahead, fallen trees and road crews, river floods with flood walls and
+the Flood risk layer, gritters. New: `shared/src/severe.ts` (the pure parts), `server/src/sim/severe.ts` (`Severe`, one per
+game, a fleet service on `sim.mobile`), `client/src/render/severe.ts` (trees, water, walls), `npm run severe:check`
+(`server/src/severe-check.ts`). Small additive edits: `shared/src/terrain.ts` (`makeElevationSampler`, `WATER_LEVEL`),
+`shared/src/weatherfx.ts` (`setWeatherScript`, `weatherGen`), `shared/src/land.ts` (`landPriceOf`'s optional per-tile
+multiplier), `shared/src/fleet.ts` (fleet kinds 12 road crew, 13 gritter), `shared/src/protocol.ts` (`severe`, `floodWall`,
+ledger `flood`), `shared/src/issues.ts` (`OVERLAY_FLOOD` = 31, `isOverlayChannel`), `shared/src/value.ts` (the hazard kind's
+words); server `sim/traffic.ts` (`closures`, `CLOSED_COST`, a per-world `gritted` hook), `sim/simulation.ts` (`stayHome`,
+`closedAt`, a builder out with a unit does not look for a site), `sim/mobile.ts` (vehicle classes), `sim/value.ts` (flood
+risk in the hazard byte), `sim/land.ts` (price and tax by tile risk), `sim/news.ts` (`severe`), `overlays.ts`, `net.ts`,
+`game.ts`, `world.ts` and `snapshot.ts` (optional `severe` field, no version bump); client `main.ts`, `world.ts`,
+`overlays.ts`, `input.ts`, `ui.ts`, `render/tv.ts`, `render/fleet.ts`, `audio/street.ts`, `style.css`.
+
+**Pure, so everyone agrees.** Flood risk, the river level and the outlook are functions of the seed, the tile and the
+tick (through `weatherFor`, so the W4 forced conditions and the new test script apply). The client's weather chip, the TV
+and the buy-land preview compute the same outlook and risk the server warns and prices from; only fallen trees, the
+water now and the walls go over the wire (`severe` message, on hello and when they change).
+
+**Flood risk** (`floodRiskAt`, `floodRiskChunk`). The world is drawn flat, but the terrain noise has a height: water is
+where it is under -0.22 (`WATER_LEVEL`). A land tile is at risk when its height is within `riskMargin` (0.1; sand is the
+first 0.08) of the water level and it is within `riskNear` (6) tiles of water; risk is 1 at the water's own height and 0 at
+the margin. A byte a tile, precomputed per chunk (0.8 ms a chunk, cached). About 9% of the land within 128 tiles of the
+origin is at risk in seeds 1, 42 and 4242.
+
+**The river level** (`riverLevel`). Each game hour's run-off is the rain over `heavyFrom` (0.3), a quarter of it in snow;
+the level reads the decayed sum over the last 48 hours (×0.96 an hour). To make every world flood about as often, wet or
+dry, the sum is scaled between the world's own 94th and 99.5th percentiles over eight years of its real weather
+(`riverClimate`, once per seed, about 10 ms): 0 below, 1 above. A tile floods while the level is at least 1 − its risk
+(`floodsAt`), counted from `floodFrom` (0.15). Real weather, six years per seed (seeds 1, 1234, 987654321, 55, 42, 7, 4242):
+2-9 flood spells (about one a game week, one a real hour), 17-64 flood hours; seed 1 (the wettest) never goes deep.
+
+**Warnings** (`severeOutlook`, `warningText`). Storms (W1's `storm` hours) and flood spells under way or starting within
+`leadHours` (24) game hours. Once a game hour the server reads it and announces each spell once (the first hour it is
+seen; saved): a news story ("Storm warning for X: gales and falling trees from 14:00 tomorrow", "Flood warning for X:
+rivers rising ..."), and a toast to every mayor with land in a storm, or with tiles that flood at a flood's peak level
+("... 226 of your tiles by the water (116 buildings) could flood. Flood defences (the Flood wall tool) hold the water
+back"). The client: a ⚠ on the weather chip (amber) with the warnings at the top of its tooltip, a red band on the TV
+weather map and the warning on teletext 140. Forced scenarios for tests: `setWeatherScript(tick => ForcedWeather | null)`,
+a pure function of the tick (the check scripts "clear, then a storm from hour H for 6 or 40 hours"); never set live.
+
+**Storms.** Overhead-line faults stay W4's ×3 (`faultMulOf`; not raised to the design's ×10). Fallen trees: in each storm
+hour every road tile in a built chunk that is beside a tree (a park's grounds, or open grass with a wild tree on it, one
+tile in four by hash) has `treePerHour` (1.2%) of a tree coming down across it, hashed from the tile, the hour and the
+seed; at most `treeMax` (12) at once. The tile goes into `Traffic.closures`: the routers (`Traffic.cost`, so cars, buses,
+fleet units and emergency vehicles) price it at `CLOSED_COST` (400), so new routes go round while any way round exists. A
+crew from the nearest builders' yard within 48 tiles (a builder on shift with no site, `FleetKind.RoadCrew`, a hi-vis van)
+drives there, works `crewMinutes` (45) and the road opens; with no crew, a contractor clears it after `treeClearHours` (8).
+The owner of the road gets a toast, the news a story per storm.
+
+**Floods.** Once a game hour, at `floodFrom` and over, a flood fill from the water's edge through the floodable land of
+built chunks (only those, so which wild chunks a client has loaded never matters). Flooded road tiles join
+`Traffic.closures`; flooded buildings (by door) shut: `Simulation.stayHome` keeps their residents home instead of setting
+out for a shift (and the staff of a flooded workplace), `closedAt` takes a flooded venue out of outings. Each flooded
+building's owner pays `damageShare` (8%) of its book value once a flood (ledger `flood`, "Flood damage", one-off), one
+toast per owner and hour; no level is lost and nothing is demolished. An owner not seen for `LAND_TUNING.awayPauseDays`
+(3, the empty-land tax's pause) pays nothing; `floodInsured(owner)` (`sim/severe.ts`) is the hook for insurance and is
+false for everyone. The news: "Floods close 64 roads in X; 116 buildings under water", then "Floodwater goes down in X:
+roads reopen".
+
+**Flood defences: the simple rule.** A flood wall is a tile of `Severe.walls`, not a catalogue building: the **Flood
+wall** tool (after the builders' yard; dragged along a bank like track, $30 a tile, only on the player's own empty land;
+a click on a wall takes it down for half back; a road, zone or building put on the tile later removes it). Wall tiles
+stop the flood fill while the level is at most `wallHold` (0.85), so the land behind a **continuous** wall along the risk
+edge stays dry; a gap lets the water round; above 0.85 it tops the wall and the land behind floods. Chosen over per-tile
+protection within a radius: the fill is cheap and a wall does what a wall does.
+
+**Flood risk on the map and in the price.** The **Flood risk** overlay (channel `OVERLAY_FLOOD`, in the H cycle after
+Neighbourhood): the risk on every dry tile at risk, a third of it on tiles a wall protects and on walls, the top where the
+water is now. The buy rectangle's status line: "flood risk: 40 of 64 tiles by the water (12 flood in a bad spell), priced
+lower". Land price: `landPriceOf(r, bytesOf, mulOf)` multiplies each tile by `floodPriceMul(risk)` = 1 − 0.45 × risk on
+both sides (so preview and charge agree; `land:check` compares them), and the empty-land tax reads the same per-tile
+price. The value field's hazard byte is at least 0.6 × the cell's mean risk, so households mind it too; in a cell with a
+field that lowers its land value a little more (a small double count, left: the per-tile price works where there is no
+field, the hazard where people choose homes).
+
+**Gritters.** While snow lies (cover over 0.05) or falls within `gritAhead` (6) hours, each builders' yard plans a round:
+road tiles within 28 tiles, main roads first (avenues, motorways and ring roads, then junctions, then the rest; nearer
+first), as the waypoints of a nearest-neighbour walk (24, every second tile), and its first free builder on shift drives
+it (`FleetKind.Gritter`, an orange lorry with its beacon). Every road tile a gritter drives over is gritted for
+`gritHours` (10): `ROAD_WEATHER.gritted(x, y)` is true there (and `Traffic.gritted`, the same per world), so the W4
+lying-snow slowdown is lifted (pace 1.00 against 0.76 ungritted in full snow). Builders work day shifts, so night snow is
+gritted on the morning round.
+
+**`severe:check`** (all pass, about 16 s): risk only on land by water; the level a pure function of the hour; on a low
+shore of seed 4242 (Bob's 20×20 town at (206, -254)), a scripted 40-hour storm: the flood warning issued at hour 23 for a
+spell from hour 47, the water at hour 48, Bob's toast and the news; 445 tiles under water, 64 road tiles closed, 116 homes
+flooded and shut, people in a flooded home stay home and a dry home's do not; Bob billed $296 once for the 116, no home
+lost or demolished; the water down and every road open after; a second run identical. A continuous wall along the risk
+edge (181 tiles) keeps all 184 tiles behind it dry at level 0.8 and is topped above 0.85; the overlay byte 124 open, 39
+behind the wall; Bob buys 3 tiles of wall for $90; his shore is $525 against $600 without the risk; the hazard byte 29%
+by the water, 1% on dry ground; a save mid-flood keeps the walls, the water, the warnings and the buildings already
+billed, and bills nothing twice; an old save loads. In a 1×1 test city filled for 30 hours: the storm warning at hour 32
+for hour 56 and Ada's toast; two trees down, a closed tile costs 402, a route between the tiles either side goes round (5
+tiles); a save mid-storm keeps them; both cleared by road crews from the yard; the same trees in a second world; snow due
+at 10:00: three gritter rounds, 76 tiles gritted, traffic's pace 1.00 on a gritted tile and 0.76 on another.
+
+**Cost.** `Severe.tick` in a 2×2 test city (4,978 people) through a storm and a snow spell: 0.05 ms a tick on average
+against 5.6 ms for the whole step; the worst tick 16 ms, the first hour after the weather script changed (the outlook's
+hundred hours of river level recomputed); in steady play the outlook adds one hour of run-off an hour.
+
+**Judgement calls and not done.**
+- Crews and gritters are builders from builders' yards (no highways depot exists); a builder out on a crew does not look
+  for a site. Builders work days, so crews and gritters do too (the contractor covers trees at night).
+- A closure is a cost, not a wall: a vehicle already routed through the tile drives on through it, and with no way round a
+  route still crosses it. The client draws the tree, barriers and water; road tooltips do not yet say "closed".
+- Walls are a server-side tile set drawn by the client, not catalogue buildings (no level, no upkeep, no planning).
+- Defences do not change the price (the risk is the ground's); the overlay shows them.
+- One river level for the world, as one weather (question 19); no catchments.
+- Storm line faults kept at ×3, as briefed.
+- `ROAD_WEATHER.gritted` is process-wide (the last game made sets it: right for a server or a local game); the traffic
+  reads its own world's `Traffic.gritted`, so checks with several games stay right.
+- Insurance is the `floodInsured` hook only.

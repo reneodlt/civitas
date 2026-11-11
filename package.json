@@ -34,7 +34,8 @@
     "refuse:check": "tsx packages/server/src/refuse-check.ts",
     "market:check": "tsx packages/server/src/market-check.ts",
     "planning:check": "tsx packages/server/src/planning-check.ts",
-    "contracts:check": "tsx packages/server/src/contracts-check.ts"
+    "contracts:check": "tsx packages/server/src/contracts-check.ts",
+    "severe:check": "tsx packages/server/src/severe-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, landPriceOf, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO, type RoadRule, type RoadRuleDTO } from '@msimcity/shared';
+import { CHUNK_SIZE, landPriceOf, floodRiskAt, floodPriceMul, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO, type RoadRule, type RoadRuleDTO } from '@msimcity/shared';
 
 export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean;
   /** what changed since the chunk was last rebuilt (DIRTY_* bits): render/chunkWork.ts runs only the passes that read it */
@@ -135,7 +135,10 @@ export class ClientWorld {
     if (d) this.landPrices.set(chunkKey(cx, cy), b64ToU8(d)); else this.landPrices.delete(chunkKey(cx, cy));
   }
   /** The price of a rectangle under the market rules, from the same bytes the server prices it from. */
-  landPrice(r: { x: number; y: number; w: number; h: number }): number { return landPriceOf(r, (cx, cy) => this.landPrices.get(chunkKey(cx, cy))); }
+  landPrice(r: { x: number; y: number; w: number; h: number }): number { return landPriceOf(r, (cx, cy) => this.landPrices.get(chunkKey(cx, cy)), this.riskMul); }
+  /** the world seed (from `welcome`): flood risk lowers a tile's price as the server's does (docs/weather.md W6) */
+  seed = 0;
+  private readonly riskMul = (x: number, y: number) => floodPriceMul(floodRiskAt(this.seed, x, y));
   applyIssues(cx: number, cy: number, d: string) {
     const key = chunkKey(cx, cy);
     if (!this.chunks.has(key)) return;

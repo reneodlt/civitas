@@ -38,7 +38,7 @@ export const VALUE_KINDS: readonly ValueKindInfo[] = [
   { key: 'noise', name: 'noise', nuisance: true, lo: 'quiet', hi: 'loud', explain: 'Busy roads, works on shift, trains, flights and late venues; leans a little downwind' },
   { key: 'smell', name: 'smell and smoke', nuisance: true, lo: 'clean air', hi: 'reeks', explain: 'Refuse depots by what they handle, smoking works and plants; carried downwind on the prevailing wind' },
   { key: 'traffic', name: 'heavy traffic', nuisance: true, lo: 'none', hi: 'lorries all day', explain: 'Lorries and buses measured on the roads, and refuse traffic' },
-  { key: 'hazard', name: 'hazard', nuisance: true, lo: 'safe', hi: 'dangerous', explain: 'Chemical and fuel works while they run' },
+  { key: 'hazard', name: 'hazard', nuisance: true, lo: 'safe', hi: 'dangerous', explain: 'Chemical and fuel works while they run, and low land by the water that floods (docs/weather.md W6)' },
   { key: 'disorder', name: 'disorder', nuisance: true, lo: 'orderly', hi: 'rowdy', explain: 'Late venues by their night crowds, empty and derelict buildings; police cover lowers it' },
   { key: 'eyesore', name: 'eyesore', nuisance: true, lo: 'pleasant', hi: 'ugly', explain: 'Derelict buildings and busy tips, close by only' },
   { key: 'green', name: 'green', nuisance: false, lo: 'built up', hi: 'leafy', explain: 'Parks, water and open country nearby' },
