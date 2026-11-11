@@ -14,6 +14,7 @@ import type { AdTarget, AdsDTO } from './adverts';
 import type { StoryDTO } from './news';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 import type { UtilityInfo, UtilLinkDTO } from './utilities';
+import type { Covenant, LandDealMsg, DealsView } from './landdeals';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | KindToolId;
 
@@ -49,6 +50,8 @@ export interface ParcelDTO {
   group?: number;
   /** a colour its owner gave it on the map (0xRRGGBB); absent: the owner's colour */
   color?: number;
+  /** covenants binding every owner (docs/multiplayer-land.md M7, shared/src/landdeals.ts); absent: none */
+  cov?: Covenant;
 }
 export interface PlayerDTO {
   id: string;
@@ -74,12 +77,15 @@ export interface PlayerDTO {
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
 export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'landtax' | 'other'
   /** M4 (docs/multiplayer-land.md section 5): the landfill levy a refuse site pays, and what a cleaner grade sells (materials, gas, power) */
-  | 'levy' | 'recycling';
+  | 'levy' | 'recycling'
+  /** M7 (docs/multiplayer-land.md section 7): land sold to another player (the buyer's side is `land`), and lease rent paid and received */
+  | 'landsale' | 'rent';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
   adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
   grant: 'Charter grants and rewards', landtax: 'Empty-land tax', other: 'Other', levy: 'Landfill levy', recycling: 'Recycling, gas and power sales',
+  landsale: 'Land sales', rent: 'Land rent',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -99,8 +105,8 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  */
 export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', roads: 'running', interest: 'running', bills: 'running', fuel: 'running',
-  funeral: 'running', burial: 'running', adrent: 'running', landtax: 'running', levy: 'running', recycling: 'running',
-  build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
+  funeral: 'running', burial: 'running', adrent: 'running', landtax: 'running', levy: 'running', recycling: 'running', rent: 'running',
+  build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff', landsale: 'oneoff',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
 export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
@@ -652,6 +658,8 @@ export type ClientMsg =
   | { t: 'parcelOp'; op: 'combine'; ids: number[] }
   | { t: 'parcelOp'; op: 'split'; id: number; axis: 'x' | 'y'; at: number }
   | { t: 'parcelOp'; op: 'ungroup'; id: number }
+  /** the land market (docs/multiplayer-land.md M7, shared/src/landdeals.ts): listings, offers, leases and pacts */
+  | LandDealMsg
   /** the world map's ground (shared/src/worldmap.ts): flat [sx, sy, version held, …] of the sectors in view, at detail `l` (0 a byte per tile, 1 per 4×4, 2 per 16×16; default 0); answered with a 'mapSector' for each whose version differs */
   | { t: 'map'; s: number[]; l?: number }
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
@@ -776,6 +784,8 @@ export type ServerMsg =
   | { t: 'overlay'; ch: number; cx: number; cy: number; d: string }
   /** market rules (shared/src/land.ts): a subscribed chunk's land price bytes, one per 4×4 cell (base64); '' is the wild price everywhere */
   | { t: 'landPrice'; cx: number; cy: number; d: string }
+  /** the land market (docs/multiplayer-land.md M7): every listing, lease and pact, and the offers this player made or received */
+  | ({ t: 'deals' } & DealsView)
   /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
   | ({ t: 'ads' } & AdsDTO)
   /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */

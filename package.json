@@ -30,7 +30,8 @@
     "roadrules:check": "tsx packages/server/src/roadrules-check.ts",
     "value:check": "tsx packages/server/src/value-check.ts",
     "land:check": "tsx packages/server/src/land-check.ts",
-    "refuse:check": "tsx packages/server/src/refuse-check.ts"
+    "refuse:check": "tsx packages/server/src/refuse-check.ts",
+    "market:check": "tsx packages/server/src/market-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

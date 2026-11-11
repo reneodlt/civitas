@@ -8,6 +8,7 @@ import { Ferry } from './sim/ferry';
 import { Harbours } from './sim/harbours';
 import { Finance } from './sim/finance';
 import { LandMarket } from './sim/land';
+import { LandDeals } from './sim/landdeals';
 import { Issues } from './sim/issues';
 import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
@@ -43,6 +44,8 @@ export interface Game {
   finance: Finance;
   /** land and money on a shared world (sim/land.ts, docs/multiplayer-land.md M2): prices by value, the empty-land tax, abandoned land */
   land: LandMarket;
+  /** the land market (sim/landdeals.ts, docs/multiplayer-land.md M7): listings, offers, covenants, leases and pacts, in every world */
+  deals: LandDeals;
   /** issue bubbles and the problems list (sim/issues.ts): a slice of the buildings looked at each tick */
   issues: Issues;
   /** house fires and the engines sent to them (sim/fires.ts) */
@@ -134,6 +137,12 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const utilities = new Utilities(world, sim.mobile);
   utilities.sandbox = cfg.sandbox;
   sim.powerGate = (b, target) => utilities.mayGrow(b, target);
+  // the land market (sim/landdeals.ts, M7): covenants cap growth before the power gate; a parcel changing hands re-reaches the utilities
+  const deals = new LandDeals(world);
+  deals.sandbox = cfg.sandbox; deals.market = land.market;
+  deals.onTransfer = () => utilities.invalidate();
+  { const gate = sim.powerGate; sim.powerGate = (b, target) => deals.mayGrow(b, target) && gate(b, target); }
+  net.deals = deals;
   net.utilities = utilities;
   if (net.onboarding) net.onboarding.powerHeld = (o) => utilities.heldBack(o);
   const tickWin = new TickWindow(300);
@@ -144,9 +153,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const perf = sim.perf;
   net.perf = perf;
-  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, land, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

@@ -667,3 +667,125 @@ levy $15.07 and $13.28 into the fund, $26.80 and $23.60 of materials sold; the s
 - Energy from waste sells power as a ledger line; it does not feed the utilities network.
 - Scrubbers are the enclosure add-on on the energy-from-waste plant, not a separate fitting.
 - The client checks limits against the parcels it has loaded; the server's check is the one that counts.
+
+## Built: M7 land market (2026-11-11)
+
+Section 7 "Land": listings and offers, covenants, leases and neighbour pacts, in **every world** (classic and market
+worlds alike; a sandbox drops the purchase rules on transfer; a showcase refuses the intents as it refuses every other).
+Code: `shared/src/landdeals.ts` (types, `LAND_DEALS` tuning, the covenant and strip rules; browser-safe),
+`server/src/sim/landdeals.ts` (`LandDeals`, one per game: the state, the intents, transfers, rent and the midnight),
+`server/src/net.ts` (the `land` intent, the `deals` message, the build and placement hooks), `World.landLocked` and
+`Parcel.cov` in `world.ts`, the snapshot field `landDeals`, the client's `client/src/landmarket.ts` (in `mapmode.ts`).
+Check: `npm run market:check` (`server/src/market-check.ts`).
+
+**Wire.**
+
+```
+client  { t: 'land', op: 'list', id, price, estate?, cov? }    list a parcel (or its whole estate) with covenants
+        { t: 'land', op: 'unlist', listing }
+        { t: 'land', op: 'offer', listing, amount }            at or above the asking price it is a purchase
+        { t: 'land', op: 'buy', listing }                       at the asking price, at once
+        { t: 'land', op: 'accept' | 'reject' | 'withdraw', offer }
+        { t: 'land', op: 'lease', id, rent, days, tenant? }     tenant: a player's name; absent: anyone may take it
+        { t: 'land', op: 'leaseAccept' | 'leaseCancel', lease }
+        { t: 'land', op: 'pact', pa, pb, strip }                pa yours, pb the neighbour's, strip a rectangle on the two
+        { t: 'land', op: 'pactAccept' | 'pactEnd', pact }        pactEnd: withdraw or decline a proposal, or give notice
+server  { t: 'deals', listings, offers, leaseOffers, leases, pacts }
+```
+
+The `deals` message goes to each client on joining and whenever anything changed; listings, lease offers, leases and
+pacts are public, offers go only to their buyer and the seller. `ParcelDTO.cov` carries a parcel's covenants. Results
+are toasts; the other party hears by toast (`LandDeals.notices`).
+
+**Listings and offers.** The holder of a parcel (its owner, or its landlord while it is leased) lists it, or its whole
+estate, at an asking price, for `LAND_DEALS.listingDays` (7). Anyone else may buy at the asking price at once, or offer
+less (one offer per buyer per listing, the latest standing); the seller accepts or rejects; the buyer may withdraw.
+**Money is checked, not held**: an offer must be within the buyer's spendable money (treasury plus the overdraft line)
+when it is made and again when it is accepted; an offer the buyer can no longer pay is dropped with the reason to both.
+Escrow would freeze money across days for offers most of which are refused, and would need its own ledger state; the
+check at acceptance is the same guarantee for the seller. Buyers in administration cannot buy or offer. A listing whose
+land changed (split, merged, its holder changed: checked every 25 ticks and at each use) is withdrawn and its bidders told;
+to sell a piece the seller splits first and lists the piece (the panel says so).
+
+**A transfer** sets `Parcel.owner` to the buyer (or, for leased land, the lease's landlord: the tenant stays), recounts
+the roads, and calls `onTransfer` (game.ts: `utilities.invalidate()`, so the reach field is rebuilt with the new
+owner). Everything else follows because every system reads the owner from the parcel: building rights, taxes, road and
+building upkeep, utility networks and bills, refuse routing, the empty-land tax; residents, jobs, sites and buildings stay
+as they are. A parcel sold out of an estate leaves it; a whole estate keeps its group. The buyer pays `land` ("Land"),
+the seller is paid `landsale` ("Land sales", a new one-off ledger line); both are toasted. Other offers lapse, and open
+lease offers on the land are dropped.
+
+**The rules a sale keeps for the buyer.** *No walling in*: each parcel goes through `checkPurchase` as if the buyer were
+buying it (earlier parcels of the same sale count as theirs), so a sale that closes a ring round someone's land, or a
+pocket of more than four unclaimed tiles, is refused ("That sale would cut off Eve's parcel"). *Outposts* on a market
+world: a sale touching none of the buyer's land must be at least 8×8, as an outpost purchase (a first plot too). *Must
+share an edge* (classic worlds) does **not** apply: it paces buying unclaimed land, and a sale is an agreement between
+two players. Leased parcels skip the walling check (their occupier does not change). `LandDeals.canTransfer(q)` is the
+hook for planning (M5): a parcel under an open application cannot be listed, leased or transferred while it says why.
+
+**Covenants** (`Parcel.cov`): set by the seller at listing, put on the land at the sale, binding every later owner;
+never lifted. A resale without one keeps it; a split copies it to both parts; a merge keeps the strictest of each
+(`joinCovenants`). A listing whose land already breaks its covenant is refused, naming what breaks it.
+
+| Covenant | Refused |
+| --- | --- |
+| no heavy industry (`noHeavy`) | industrial zoning, refuse sites, polluting power stations, the airport (`isHeavyNuisanceKind`) |
+| stays a park (`park`) | every zone and building that is not a park (`isParkKind`), parking lots and bus stops; roads are allowed |
+| no building over N levels (`maxLevel`) | growth past level N (`LandDeals.mayGrow`, chained before the power gate in game.ts) |
+
+Zoning and one-tile buildings are checked per tile in `net.ts build` (`buildRefusal`); structures over their whole
+footprint in `placeStructure` (`placeRefusal`, before the M4 boundary limit). The parcel panel lists the covenants and
+the hover line names them. Price impact is left to the market, as decided.
+
+**Leases.** The holder offers a lease (rent a day, a term of 1-60 days, to a named player or anyone); a tenant takes
+it (not in administration, with a day's rent spendable). For the term **the tenant is `Parcel.owner`**: they build,
+zone and collect taxes as owner and pay its upkeep and empty-land tax; the landlord is kept on the lease. Each midnight
+the tenant pays the rent to the landlord (`rent`, "Land rent", a running line on both ledgers). At the end of the term
+the land goes back to the landlord **with whatever is on it** (the simpler of the design's two rules: no book-value
+buy-out; a tenant builds knowing the term). A tenant in administration at midnight has missed the rent: the lease ends
+there and then, the land back to the landlord. While a lease runs the parcel is locked (`World.landLocked`): no split,
+combine, recovery-plan sell-back or abandonment; a leased member leaves its estate when the lease starts. The landlord
+may sell the freehold: the lease goes with it (the buyer becomes the landlord on the same terms, the tenant is told);
+the tenant cannot sell.
+
+**Neighbour pacts.** Two holders of edge-adjacent parcels agree a buffer strip, a rectangle lying on the two parcels
+(the client offers a band along the shared edge, 1-8 tiles each side). The proposer's neighbour accepts or declines;
+proposals lapse after 7 days. While it is in force nobody may zone industry or place a heavy nuisance building with
+any tile in the strip (`stripRefusal`, the same kinds as the covenant). **No money** changes hands (the design's "share
+its cost" is kept to nothing: a split of the strip's empty-land tax would only matter on a market world and the strip
+is usually built on). Either side may give notice; the pact ends `pactNoticeDays` (3) midnights later. A pact binds the
+land: it survives a sale (its parties are whoever holds the two parcels), and goes if either parcel is merged away.
+
+**Client.** The world map's parcel panel (`mapmode.ts` with `landmarket.ts`) gains a Land market block: covenants, the
+lease, pacts with Accept, Decline and Give notice; for sale with Buy, an offer field and Withdraw offer; for the seller
+its offers with Accept and Reject and Withdraw listing; a **Sell…** section (asking price, defaulting to the book value,
+the whole estate, the three covenants) and a **Lease out…** section (rent, term, tenant). Picking one of your parcels
+and a neighbour's shows a Neighbour pact block. The market box at the bottom left has a **For sale (N)** toggle for the
+layer (listed land tinted by price a tile: under $2, $2-5, $5-15, over $15, with a legend), the listings cheapest a tile
+first (a click selects the land), and **Your deals**: offers received and made, leases offered to you, pacts proposed
+to you, each with its buttons. The panel's open sections and typed values survive its redraws.
+
+**Persistence.** `Snapshot.landDeals` (optional; `LandDealsSave`: the next id, listings with their land signature,
+offers, lease offers, leases, pacts), absent while there are none; covenants ride on the saved parcels. Saves from
+before M7 load with an empty market.
+
+**Measured.** market:check, all pass: list → offer → accept moves the parcel, its house and street (Bob pays their
+upkeep) and the money on both ledgers; an offer past spendable money is refused; buy-now; a listing is up after 6 days
+and lapses after 7 with its offers, both sides told; splitting listed land withdraws the listing; a "no heavy industry"
+covenant refuses industrial zoning and a tip for the buyer and still binds after a resale without it; a park covenant
+on zoned land is refused at listing, and on park land homes are refused while a park and roads are fine; a level cap
+holds growth at the growth gate; a lease (tenant zones, landlord cannot, split refused, rent $50 a day both sides, the
+freehold sold with the lease, the land back with the tenant's zoning at the end); missed rent in administration ends a
+lease; a pact refuses industry and a tip in the strip on the proposer's own side, allows them outside, holds through the
+notice and ends after it; walling in refused on transfer; on a market world a 4×4 far sale is refused as an outpost; the
+snapshot round trip (market, covenants, tenant, the lock) and an older save; a showcase refuses. typecheck, build,
+parcels:check, land:check, finance:check, roadrules:check and refuse:check pass.
+
+**Differences from the design.**
+
+- Covenants can only be set when listing (the design's "set by the seller"); there is no way to put one on your own
+  land without selling it, and none is ever lifted. The level cap applies to growth; placed buildings have no levels
+  to cap.
+- Leases return the land with its buildings, never the book-value buy-out; there is no early surrender.
+- Pacts share no cost; the strip is a rectangle on the two parcels, offered by the client as a band along the edge.
+- Transfers are between players only: no auction, no regional buyer, no self-assessed prices (decision 4 stays held back).

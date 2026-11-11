@@ -6,6 +6,7 @@ import { CameraRig, MAP_PITCH, DIST_MAX, MAP_DIST_MIN, MAP_DIST_MAX } from './ca
 import type { MapInput } from './input';
 import { MapView, type MapMark } from './render/worldmap';
 import { eduTotals, eduIndexLabel } from './eduView';
+import { LandMarketView } from './landmarket';
 
 /**
  * The world map mode (docs/world-map.md): Tab, the map chip, or zooming out past the 3D limit. Owns the map's camera
@@ -49,8 +50,15 @@ export class MapMode implements MapInput {
   private lastView = '';
   private tmp = new Vector3();
   private panelSig = '';
+  /** the selection the panel was last drawn for (its market forms are kept across redraws of it) */
+  private keptSig = '';
   /** the status line holds a preview's verdict, to clear when the preview goes */
   private saidStatus = false;
+  /** the land market (landmarket.ts, docs/multiplayer-land.md M7): the panel's market block, the For sale layer and the market box */
+  readonly market: LandMarketView;
+  private box = document.createElement('div');
+  /** a proposed pact's strip: tiles each side of the shared edge */
+  private stripD = 2;
 
   constructor(private d: Deps) {
     this.view = new MapView(d.mount);
@@ -61,6 +69,11 @@ export class MapMode implements MapInput {
     this.panel.addEventListener('change', (e) => this.onPanelChange(e));
     this.panel.addEventListener('input', (e) => { const t = e.target as HTMLInputElement; if (t.id === 'mpRate') this.panel.querySelector('#mpRateV')!.textContent = `${t.value}%`; });
     d.net.tap((m) => this.onMsg(m));
+    this.market = new LandMarketView(d.world);
+    this.box.id = 'mapMarket';
+    this.box.className = 'hidden';
+    d.mount.appendChild(this.box);
+    this.box.addEventListener('click', (e) => this.onMarketClick(e, this.box));
   }
 
   private onMsg(m: ServerMsg) {
@@ -69,6 +82,7 @@ export class MapMode implements MapInput {
     else if (m.t === 'lines') this.view.setBusLines(m.lines);
     else if (m.t === 'railLines') this.view.setRailLines(m.lines);
     else if (m.t === 'metroLines') this.view.setMetroLines(m.lines);
+    else if (m.t === 'deals') { const { t: _t, ...v } = m; this.market.deals = v; this.panelSig = ''; this.refresh(); }
   }
   /** parcels or players changed (main.ts): taken in by the next frame, at most every PARCELS_MS (a parcels message comes with most ticks) */
   parcelsChanged() { this.parcelsStale = true; }
@@ -106,6 +120,7 @@ export class MapMode implements MapInput {
       this.d.status('');
     }
     this.panel.classList.toggle('hidden', !on || !this.sel.length);
+    this.box.classList.toggle('hidden', !on);
     this.d.onToggle(on);
     this.refresh();
   }
@@ -205,6 +220,8 @@ export class MapMode implements MapInput {
     const p = this.parcelAt(x, y), w = this.d.world;
     const what = CLASS_NAMES[mapClassOf(this.view.byteAt(x, y))] ?? '';
     let s = `(${x}, ${y}) · ${what} · ${p ? `${p.name} (${w.players.get(p.owner)?.name ?? p.owner}), ${p.w}×${p.h}${p.group !== undefined ? ', estate' : ''}` : 'unclaimed land'}`;
+    const note = p ? this.market.hoverNote(p) : '';
+    if (note) s += ` · ${note}`;
     if (this.splitFor) s += ' · drag across the parcel to cut it in two (Esc cancels)';
     else if (this.sel.length) s += ' · shift-click to add or remove parcels';
     this.d.status(s);
@@ -261,7 +278,7 @@ export class MapMode implements MapInput {
         status = plan.reason;
       }
     }
-    this.view.setSelection(this.sel, marks);
+    this.view.setSelection(this.sel, [...this.market.marks(), ...marks]);
     if (status || this.saidStatus) this.d.status(status);
     this.saidStatus = !!status;
     return status;
@@ -274,13 +291,24 @@ export class MapMode implements MapInput {
     const status = this.preview();
     const w = this.d.world;
     const sel = this.sel.map((id) => w.parcels.get(id)).filter((p): p is ParcelDTO => !!p);
+    this.box.innerHTML = this.market.boxHtml();
     this.panel.classList.toggle('hidden', !sel.length);
     if (!sel.length) { this.panelSig = ''; return; }
     const focused = this.panel.contains(document.activeElement) && (document.activeElement as HTMLElement).tagName === 'INPUT';
     const sig = `${sel.map((p) => p.id).join(',')}|${this.splitFor}`;
     if (focused && sig === this.panelSig) { this.fillStats(sel); return; } // typing a name: leave the inputs alone
     this.panelSig = sig;
+    // the market's forms (landmarket.ts) survive a redraw of the same selection: open sections and what was typed
+    const keep = sig === this.panelSig || sig === this.keptSig ? [...this.panel.querySelectorAll<HTMLInputElement | HTMLDetailsElement>('details[id^=mk], input[id^=mk], select[id^=mk]')]
+      .map((e) => [e.id, e instanceof HTMLDetailsElement ? e.open : (e as HTMLInputElement).type === 'checkbox' ? (e as HTMLInputElement).checked : e.value] as const) : [];
+    this.keptSig = sig;
     this.panel.innerHTML = sel.length === 1 ? this.oneHtml(sel[0]) : this.manyHtml(sel, status);
+    for (const [id, v] of keep) {
+      const e = this.panel.querySelector<HTMLElement>(`#${id}`);
+      if (e instanceof HTMLDetailsElement) e.open = v as boolean;
+      else if (e instanceof HTMLInputElement && e.type === 'checkbox') e.checked = v as boolean;
+      else if (e instanceof HTMLInputElement || e instanceof HTMLSelectElement) e.value = String(v);
+    }
     this.fillStats(sel);
   }
   private estate(p: ParcelDTO) { return p.group === undefined ? [p] : [...this.d.world.parcels.values()].filter((q) => q.group === p.group); }
@@ -330,6 +358,7 @@ export class MapMode implements MapInput {
     return `<h2><span class="sw" style="background:${hex(colour)}"></span><span>${esc(p.name)}</span></h2>
       <div class="sub">${esc(owner?.name ?? p.owner)} · ${p.w}×${p.h} at (${p.x}, ${p.y})${inEstate ? ` · estate of ${est.length} parcels` : ''}</div>
       ${this.table(inEstate)}
+      ${this.market.parcelHtml(p)}
       ${mine ? `
         <label>Name${inEstate ? ' (the whole estate)' : ''}<input type="text" id="mpName" maxlength="24" value="${esc(p.name)}"></label>
         <label>Colour</label><div class="mswatches">${swatches}</div>
@@ -349,11 +378,29 @@ export class MapMode implements MapInput {
       <div class="sub">${sel.map((p) => esc(p.name)).join(' · ')}</div>
       ${this.table(false)}
       <div class="mplan ${plan.ok ? 'ok' : 'bad'}">${esc(status || (plan.ok ? '' : plan.reason))}</div>
-      <div class="mbtns"><button class="chip" data-act="combine" ${plan.ok ? '' : 'disabled'}>Combine</button><button class="chip" data-act="clear">Clear</button></div>`;
+      <div class="mbtns"><button class="chip" data-act="combine" ${plan.ok ? '' : 'disabled'}>Combine</button><button class="chip" data-act="clear">Clear</button></div>
+      ${this.market.pactHtml(sel, this.stripD)}`;
   }
   /** fly back to 3D over a point (main.ts sets the target) */
   onView: (x: number, y: number) => void = () => {};
+  /** A land-market button (landmarket.ts) in the panel or the market box. Returns whether it was one. */
+  private onMarketClick(e: MouseEvent, root: HTMLElement): boolean {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mk]');
+    if (!b) return false;
+    if (b.dataset.mk === 'layer') this.market.layer = !this.market.layer;
+    else if (b.dataset.mk === 'go') {
+      const p = this.d.world.parcels.get(Number(b.dataset.id));
+      if (p) { this.sel = [p.id]; this.splitFor = 0; this.d.rig.target.set(p.x + p.w / 2, 0, p.y + p.h / 2); }
+    } else {
+      const m = this.market.act(b, root);
+      if (m) this.d.net.send(m);
+    }
+    this.panelSig = '';
+    this.refresh();
+    return true;
+  }
   private onPanelClick(e: MouseEvent) {
+    if (this.onMarketClick(e, this.panel)) return;
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!b) return;
     const p = this.d.world.parcels.get(this.sel[0]);
@@ -373,6 +420,8 @@ export class MapMode implements MapInput {
     if (!p) return;
     if (t.id === 'mpName' && t.value.trim()) this.d.net.send({ t: 'parcel', id: p.id, name: t.value.trim() });
     if (t.id === 'mpRate') this.d.net.send({ t: 'parcel', id: p.id, taxRate: Number(t.value) / 100 });
+    if (t.id === 'mkStrip') { this.stripD = Math.max(1, Math.min(8, Number(t.value) || 2)); this.panelSig = ''; this.refresh(); return; }
+    if (t.id.startsWith('mk')) return; // the market's form fields are read when its button is pressed
     t.blur();
   }
 }

@@ -124,6 +124,7 @@ export class LandMarket {
       if (away >= T.abandonEmptyDays) {
         let back = 0, n = 0, nb = 0;
         for (const q of list) {
+          if (w.landLocked?.(q.id)) continue; // leased land (sim/landdeals.ts, M7) goes back to its landlord, not the market
           if (this.unbuilt(q)) { back += this.revert(q); n++; }
           else if (T.abandonBuiltDays > 0 && away >= T.abandonBuiltDays && w.players.has('sys')) { back += this.toCommons(q); nb++; }
         }

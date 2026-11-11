@@ -10,6 +10,7 @@ import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 import type { StreetsSave } from './streets';
 import type { RoadRuleDTO } from '@msimcity/shared';
+import type { LandDealsSave } from '@msimcity/shared';
 
 /**
  * v8: the per-chunk under layer (tunnels and platforms, docs/underground.md), stored only where it is not all zero,
@@ -68,6 +69,11 @@ export interface Snapshot {
    * [x, y, bits]); optional, absent in older saves and while the fund is untouched and no site has an add-on
    */
   refuse?: { fund: number; levied: number; paid: number; short: number; addons?: [number, number, number][] };
+  /**
+   * the land market (docs/multiplayer-land.md M7, sim/landdeals.ts): listings, offers, lease offers, leases and pacts;
+   * optional, absent in older saves and while there are none (covenants are on the parcels, `Parcel.cov`)
+   */
+  landDeals?: LandDealsSave;
 }
 export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
@@ -107,6 +113,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.newsSave ? newsField(w.newsSave()) : {}),
     ...(w.deathSave ? deathField(w.deathSave()) : {}),
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
+    ...(w.landDealsSave ? landDealsField(w.landDealsSave()) : {}),
   };
 }
 
@@ -120,6 +127,9 @@ const newsField = (n: NewsSave) => (n.stories.length ? { news: n } : {});
 const deathField = (d: DeathSave) => (d.dead.length || d.grief.length || Object.keys(d.first).length ? { death: d } : {});
 /** The utilities field, left out while there are no links, faults or settings (so a save without them is as before). */
 const utilitiesField = (u: UtilitiesSave | null) => (u ? { utilities: u } : {});
+
+/** The land market field, left out while there are no deals (so a save without them is as before). */
+const landDealsField = (d: LandDealsSave | null) => (d ? { landDeals: d } : {});
 
 /** Whether this build can read a snapshot of that format (the current one, or one it upgrades in place). */
 export const readableVersion = (version: number | undefined) => version === VERSION || UPGRADES_FROM.includes(version as number);
@@ -183,6 +193,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.news && typeof snap.news === 'object') w.newsLoaded = snap.news;
   if (snap.death && typeof snap.death === 'object') w.deathLoaded = snap.death;
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
+  if (snap.landDeals && typeof snap.landDeals === 'object') w.landDealsLoaded = snap.landDeals;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

@@ -16,7 +16,7 @@ import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
 import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
-
+import { joinCovenants, type Covenant, type LandDealsSave } from '@msimcity/shared';
 import { StreetBook } from './streets';
 export interface Chunk {
   cx: number; cy: number;
@@ -62,6 +62,8 @@ export interface Parcel {
   group?: number;
   /** a colour its owner gave it on the map; absent: the owner's */
   color?: number;
+  /** covenants binding every owner (docs/multiplayer-land.md M7, shared/src/landdeals.ts); absent in older saves and for none */
+  cov?: Covenant;
 }
 /**
  * A road tile on unclaimed land (docs/multiplayer-land.md section 8, M3; sim/publicroads.ts keeps them): who pays for it,
@@ -316,6 +318,11 @@ export class World {
   /** utilities (sim/utilities.ts, docs/utilities.md): what to save, set by the Utilities module; and what a loaded snapshot carried, taken once by it */
   utilitiesSave: (() => UtilitiesSave | null) | null = null;
   utilitiesLoaded: UtilitiesSave | null = null;
+  /** the land market (sim/landdeals.ts, docs/multiplayer-land.md M7): what to save, set by LandDeals; and what a loaded snapshot carried */
+  landDealsSave: (() => LandDealsSave | null) | null = null;
+  landDealsLoaded: LandDealsSave | null = null;
+  /** why a parcel may not be split, combined, sold back or abandoned now (a lease running on it, sim/landdeals.ts); null: free */
+  landLocked: ((id: number) => string | null) | null = null;
   /** fired when builders finish a site (completeSite), after the tile shows the finished building: the news reports openings */
   onSiteCompleted: ((site: Site) => void) | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */
@@ -1271,6 +1278,7 @@ export class World {
     return {
       id: p.id, owner: p.owner, name: p.name, x: p.x, y: p.y, w: p.w, h: p.h, taxRate: p.taxRate, stats: { ...p.stats, jobsByKind: [...p.stats.jobsByKind], staffedByKind: [...p.stats.staffedByKind] },
       ...(p.group !== undefined ? { group: p.group } : {}), ...(p.color !== undefined ? { color: p.color } : {}),
+      ...(p.cov ? { cov: { ...p.cov } } : {}),
     };
   }
 
@@ -1287,6 +1295,7 @@ export class World {
   combineParcels(ids: readonly number[], mayEdit: (owner: string) => boolean): string | { merged: number; estate: number } {
     const plan = planCombine(ids, (id) => this.parcels.get(id), this.parcels.values(), mayEdit);
     if (!plan.ok) return plan.reason;
+    for (const id of plan.parcels) { const why = this.landLocked?.(id); if (why) return why; } // a lease running (M7)
     const lead = this.parcels.get(Math.min(...plan.parcels))!;
     for (const [keep, gone] of plan.merges) {
       const k = this.parcels.get(keep)!, g = this.parcels.get(gone)!;
@@ -1294,6 +1303,7 @@ export class World {
       const x0 = Math.min(k.x, g.x), y0 = Math.min(k.y, g.y); // the two make a rectangle: their bounding box
       Object.assign(k, { x: x0, y: y0, w: Math.max(k.x + k.w, g.x + g.w) - x0, h: Math.max(k.y + k.h, g.y + g.h) - y0 });
       k.stats.taxToday += g.stats.taxToday; k.stats.taxYesterday += g.stats.taxYesterday;
+      if (k.cov || g.cov) k.cov = joinCovenants(k.cov, g.cov); // covenants bind the land: the merged parcel keeps the strictest (M7)
       this.parcels.delete(gone);
       this.removedParcels.add(gone); this.dirtyParcels.delete(gone);
     }
@@ -1314,6 +1324,8 @@ export class World {
   splitParcel(id: number, axis: 'x' | 'y', at: number, mayEdit: (owner: string) => boolean): string | Parcel {
     const p = this.parcels.get(id);
     if (!p || !mayEdit(p.owner)) return 'Not your parcel';
+    const locked = this.landLocked?.(id); // a lease running (M7)
+    if (locked) return locked;
     const plan = planSplit(p, axis, at, {
       isWater: (x, y) => !isBuildable(this.getTile(x, y)),
       doorOf: (x, y) => this.doorOf(x, y),
@@ -1321,7 +1333,7 @@ export class World {
     });
     if (!plan.ok) return plan.reason;
     const name = `${p.name.replace(/ \((east|south)\)$/, '')} (${plan.side})`.slice(0, 24);
-    const q: Parcel = { id: this.nextId++, owner: p.owner, name, ...plan.part, taxRate: p.taxRate, stats: emptyStats(), ...(p.color !== undefined ? { color: p.color } : {}) };
+    const q: Parcel = { id: this.nextId++, owner: p.owner, name, ...plan.part, taxRate: p.taxRate, stats: emptyStats(), ...(p.color !== undefined ? { color: p.color } : {}), ...(p.cov ? { cov: { ...p.cov } } : {}) };
     Object.assign(p, plan.keep);
     this.parcels.set(q.id, q);
     for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) this.setParcelId(x, y, q.id);

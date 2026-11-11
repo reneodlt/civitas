@@ -156,7 +156,10 @@ to several seconds a frame.
 
 ## 5. Follow-ups
 
-- Selling or transferring parcels between players, on the map.
+- ~~Selling or transferring parcels between players, on the map.~~ Built: the land market, `docs/multiplayer-land.md`
+  "Built: M7 land market" (listings, offers, covenants, leases and neighbour pacts in the parcel panel; the For sale
+  layer and the market box on the map; `client/src/landmarket.ts`).
+- Dragging a pact's strip freely (today it is a band along the shared edge, a set number of tiles each side).
 - A minimap inset in 3D mode, from the same sector textures.
 - Splitting an estate along a line through several members at once.
 - A push of sector changes while the map is up (now a 3 s poll).

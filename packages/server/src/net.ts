@@ -31,6 +31,7 @@ import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
 import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { LandMarket } from './sim/land';
+import type { LandDeals } from './sim/landdeals';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
@@ -153,6 +154,8 @@ export class Net {
   finance: Finance | null = null;
   /** land and money on a shared world (sim/land.ts); set by game.ts. Its `market` says whether the market rules are on */
   land: LandMarket | null = null;
+  /** the land market (sim/landdeals.ts, docs/multiplayer-land.md M7): listings, offers, covenants, leases, pacts; set by game.ts */
+  deals: LandDeals | null = null;
   private get market() { return !!this.land?.market; }
   /** the value field's version when the land prices were last looked at (flushLand) */
   private landVer = -1;
@@ -262,6 +265,7 @@ export class Net {
       case 'renameStreet': return this.renameStreet(c, m.x, m.y, m.ns === true, m.name);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
       case 'parcelOp': return this.parcelOp(c, m);
+      case 'land': return this.landDeal(c, m);
       case 'map': for (const json of this.map.answer(m.s, m.l)) if (c.conn.open) c.conn.send(json); return;
       case 'inspect': return this.inspect(c, m.x, m.y, m.full === true);
       case 'inspectCitizen': {
@@ -405,6 +409,7 @@ export class Net {
     if (this.harbours) this.send(c, this.harbours.msg());
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
+    if (this.deals) this.send(c, { t: 'deals', ...this.deals.view(c.player.id) });
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
     this.send(c, { t: 'graves', list: this.sim.death.graves() });
     this.send(c, { t: 'roadRules', r: this.w.roadRulesList() });
@@ -706,6 +711,11 @@ export class Net {
       }
       const parcel = this.w.parcelAt(x, y);
       const ownsIt = !!parcel && this.mayEdit(p, parcel.owner);
+      if (ownsIt && this.deals && !isRoad(t)) { // covenants and neighbour pacts' strips (sim/landdeals.ts, M7); a structure is checked by its footprint
+        const k = tool in TOOL_ZONE ? TOOL_ZONE[tool] : tool in TOOL_CIVIC && !isMultiTile(TOOL_CIVIC[tool]) ? TOOL_CIVIC[tool] : tool === 'busstop' ? BUS_STOP_KIND : tool === 'park' ? Zone.Parking : 0;
+        const why = k ? this.deals.buildRefusal(x, y, k) : null;
+        if (why) { this.toast(c, why); return; }
+      }
       let cost = 0;
       let apply: () => void;
       const need = dev ? null : this.locked(p, tool);
@@ -1137,6 +1147,8 @@ export class Net {
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
     if (budget < CIVIC_COST[kind]) { this.toast(c, this.w.shortOf(p, CIVIC_COST[kind], `for the ${KIND_NAMES[kind]}`)); return false; }
+    const deal = this.deals?.placeRefusal(verdict.placed); // a covenant or a neighbour pact's strip (M7)
+    if (deal) { this.toast(c, deal); return false; }
     const limit = this.boundaryRefusal(p, kind, verdict.placed.doorX, verdict.placed.doorY, 0); // a refuse site's nuisance at others' boundaries (M4)
     if (limit) { this.toast(c, limit); return false; }
     const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
@@ -1473,6 +1485,12 @@ export class Net {
       this.w.dirtyParcels.add(p.id);
     }
   }
+  /** A land-market intent (sim/landdeals.ts, docs/multiplayer-land.md M7): the result as a toast. */
+  private landDeal(c: Client, m: Extract<ClientMsg, { t: 'land' }>) {
+    if (!this.deals) return this.toast(c, 'No land market on this server');
+    const r = this.deals.handle(c.player!, m);
+    this.toast(c, r.msg, r.ok ? 'info' : undefined);
+  }
   /** Combine, split or leave an estate (World.combineParcels etc., rules in shared/src/parcelops.ts). */
   private parcelOp(c: Client, m: Extract<ClientMsg, { t: 'parcelOp' }>) {
     const may = (owner: string) => this.mayEdit(c.player!, owner);
@@ -1637,6 +1655,9 @@ export class Net {
       this.toast(c, n.msg, 'info');
     }
     if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
+    // the land market (sim/landdeals.ts, M7): each client's view when anything changed, and the parties' notices
+    if (this.deals?.changed) { this.deals.changed = false; for (const c of this.clients) if (c.player && c.conn.open) this.send(c, { t: 'deals', ...this.deals.view(c.player.id) }); }
+    if (this.deals?.notices.length) for (const n of this.deals.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {

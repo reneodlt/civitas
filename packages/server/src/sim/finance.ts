@@ -149,6 +149,7 @@ export class Finance {
    */
   private sellable(q: Parcel): boolean {
     const w = this.w;
+    if (w.landLocked?.(q.id)) return false; // a lease running (sim/landdeals.ts, M7): the tenant cannot sell the landlord's land
     for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) {
       const t = w.peekTile(x, y);
       if (t === undefined) continue;
