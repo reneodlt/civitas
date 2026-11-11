@@ -50,6 +50,7 @@ import { Families } from './families';
 import { Learning, ERRAND_CLASS } from './learning';
 import { Death, ERRAND_FUNERAL } from './death';
 import { Motivation, MOTIVATION, inheritValues, essentialJob, type MotiveHost } from './motivation';
+import { ValueField } from './value';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -203,6 +204,8 @@ export class Simulation {
   taxis: Taxis;
   delivery: Delivery;
   refuse: Refuse;
+  /** the neighbourhood value field (sim/value.ts): nuisance and amenity per 4×4 cell; homes and growth read it */
+  value: ValueField;
   couriers: Couriers;
   /** schools (sim/schools.ts, docs/education.md): admissions, the school day, results */
   schools: Schools;
@@ -249,6 +252,7 @@ export class Simulation {
       parks: (x, y) => this.leisureCoverage(x, y).parks,
       moveHome: (c, b, hh) => this.moveHome(c, b, hh),
       homeOk: (b) => b.zone === Zone.Residential && b.id !== CAMP_KIND && w.hasRoadAccess(b.x, b.y),
+      value: (x, y, wts) => this.value.valueAt(x, y, wts),
     };
     this.traffic = new Traffic(w);
     this.transit = new Transit(w);
@@ -266,6 +270,11 @@ export class Simulation {
     this.mobile.register(this.delivery);
     this.refuse = new Refuse(w, this.mobile);
     this.mobile.register(this.refuse);
+    // the neighbourhood value field (sim/value.ts, docs/multiplayer-land.md section 4): rail and airports are wired by game.ts
+    this.value = new ValueField(w, {
+      eachMover: (fn) => this.traffic.eachMover(fn), eachStop: (fn) => this.transit.eachStop(fn),
+      handledAt: (x, y) => this.refuse.handledAt(x, y), services: () => this.services,
+    });
     this.couriers = new Couriers(w, this.mobile);
     this.mobile.register(this.couriers);
     this.schools = new Schools(w, {
@@ -310,6 +319,7 @@ export class Simulation {
     if (w.tick % GROWTH_EVERY === 19) plantGardens(w); // homes all round a block's middle plant a communal garden there (sim/blocks.ts)
     if (w.tick % SPAWN_EVERY === 3) this.spawn();
     if (w.tick % ENTRIES_EVERY === 7) this.findEntries();
+    this.value.tick(); // hourly: the neighbourhood value field
     perf.lap('plan');
     this.gateways.tick((g, hx, hy, tag) => this.arriveVia(g, hx, hy, tag));
     this.start.tick(); // a camp's settlers coming up the road (sim/firstfive.ts)
@@ -387,6 +397,8 @@ export class Simulation {
       info.residents = r;
       const lc = this.leisureCoverage(b.x, b.y);
       info.leisure = { score: lc.score, label: ['little to do nearby', 'some places to go', 'plenty to do nearby'][leisureTier(lc.score)], parks: lc.nParks, venues: lc.nVenues };
+      const hood = this.value.describe(b.x, b.y);
+      if (hood) info.hood = hood;
     } else {
       const shifts = new Map<string, number>();
       const wk = { total: 0, onShift: 0, commuting: 0, offDuty: 0, drivers: 0, shifts: [] as [string, number][] };
@@ -1050,12 +1062,13 @@ export class Simulation {
   /**
    * How tall a neighbourhood lets merged lots grow: a hash of the 7×7-tile cell picks low-rise (3), mid-rise (5) or
    * high-rise (7) character and a per-lot hash nudges it a level either way, so streets mix sizes and not every
-   * block becomes towers.
+   * block becomes towers. The neighbourhood value moves it at most a level either way (ValueField.ambitionDelta).
    */
   private ambition(x: number, y: number): number {
     const hood = hash2(Math.floor(x / 7) * 7 + 3, Math.floor(y / 7) * 13 + 5);
     const lot = hash2(x * 13 + 7, y * 29 + 11);
-    const a = (hood < 0.3 ? 3 : hood < 0.65 ? 5 : 7) + (lot < 0.25 ? -1 : lot > 0.85 ? 1 : 0);
+    const a = (hood < 0.3 ? 3 : hood < 0.65 ? 5 : 7) + (lot < 0.25 ? -1 : lot > 0.85 ? 1 : 0)
+      + this.value.ambitionDelta(x, y); // the neighbourhood value: one level less beside a nuisance, one more where it is sought after
     return Math.max(2, Math.min(MAX_LEVEL, a));
   }
 

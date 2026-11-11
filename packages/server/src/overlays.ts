@@ -1,6 +1,7 @@
 import {
   CHUNK_SIZE, Overlay, OVERLAY_COVERAGE_FULL, OVERLAY_JOBS_RADIUS, OVERLAY_JOBS_FULL, Zone, Terrain, KIND_COUNT,
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, LEISURE_CODES, LEISURE_MAX_RADIUS, capacityOf, leisureAt, isRoad, zoneOf, overlayByte,
+  NEIGHBOURHOOD_KIND0, isNeighbourhoodOverlay, VALUE_CELL, VALUE_CELLS, VALUE_SLOTS, VALUE_SLOT_VALUE,
 } from '@msimcity/shared';
 import type { World } from './world';
 import type { Simulation } from './sim/simulation';
@@ -36,8 +37,24 @@ export class Overlays {
       case Overlay.Happiness: return this.happiness(cx, cy, ch0.tiles, ch0.aux);
       case Overlay.JobsHomes: return this.jobsHomes(cx, cy, ch0.tiles);
       case Overlay.News: return this.newsReach(cx, cy, ch0.tiles);
-      default: return null;
+      default: return isNeighbourhoodOverlay(ch) ? this.neighbourhood(ch, cx, cy, ch0.tiles) : null;
     }
+  }
+
+  /**
+   * The Neighbourhood layer (sim/value.ts): each 4×4 cell's byte on its land tiles, the combined value (1 is the middle
+   * of the diverging ramp) or one kind. A chunk with no field (nothing built near) shows no data.
+   */
+  private neighbourhood(ch: number, cx: number, cy: number, tiles: Uint16Array) {
+    const f = this.sim.value.chunkBytes(cx, cy), out = new Uint8Array(N);
+    if (!f) return out;
+    const slot = ch === Overlay.Neighbourhood ? VALUE_SLOT_VALUE : ch - NEIGHBOURHOOD_KIND0;
+    for (let i = 0; i < N; i++) {
+      if (!this.land(tiles[i])) continue;
+      const lx = i % CHUNK_SIZE, ly = Math.floor(i / CHUNK_SIZE);
+      out[i] = overlayByte(f[(Math.floor(ly / VALUE_CELL) * VALUE_CELLS + Math.floor(lx / VALUE_CELL)) * VALUE_SLOTS + slot] / 255);
+    }
+    return out;
   }
 
   private land(t: number) { return !isRoad(t) && (t & 3) !== Terrain.Water; }

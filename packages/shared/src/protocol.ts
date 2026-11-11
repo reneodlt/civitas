@@ -260,6 +260,8 @@ export interface BuildingInfo {
   };
   /** homes: leisure places within reach (coverage score: the sum of their leisure values, capped) */
   leisure?: { score: number; label: string; parks: number; venues: number };
+  /** homes: the neighbourhood value for the average household (1 is neutral) and the worst nuisance and best amenity, percent (server sim/value.ts) */
+  hood?: { value: number; nuisance?: [string, number]; amenity?: [string, number] };
   /** cars this building (or lot) can take off the street */
   parking?: { capacity: number; used: number; underground: boolean; turnedAway: number; fee?: number; incomeToday?: number };
   /** airport terminals: the runway behind it and today's flights (shared/src/airport.ts) */

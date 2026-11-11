@@ -554,6 +554,8 @@ export class Transit {
     }
     return best;
   }
+  /** Every routed stop tile (tkey) and how many lines call there (sim/value.ts: access). */
+  eachStop(fn: (k: number, lines: number) => void) { for (const [k, v] of this.linesAt) fn(k, v.length); }
   /** Routed stops within Manhattan distance r of (x, y), nearest first, with the lines calling there (a station's "change here for"). */
   stopsAround(x: number, y: number, r: number): { s: StopRef; d: number; lines: TransitLine[] }[] {
     return this.stopsNear(x, y, r).sort((a, b) => a.d - b.d || a.s.x - b.s.x || a.s.y - b.s.y)

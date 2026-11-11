@@ -91,6 +91,7 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   sim.freight = rail;
   rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
   sim.traffic.barrier = (x, y) => rail.barrierDown(x, y); // level crossings: traffic waits while a train passes
+  sim.value.rail = rail; sim.value.airports = airports; // trains and flights are noise in the neighbourhood value (sim/value.ts)
   const harbours = new Harbours(world, sim); // hooks itself into the gateways (sea route, ships berthing) and freight (port exports)
   const finance = new Finance(world, cfg.sandbox);
   const net = new Net(world, sim, source, cfg);

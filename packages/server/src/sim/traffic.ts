@@ -520,6 +520,8 @@ export class Traffic {
   /** walkers by the tile they were on when they last moved: last tick's and this tick's (positions are read live) */
   private walkPrev = new TileLists();
   private walkCur = new TileLists();
+  /** Every mover on the road lanes now (sim/value.ts samples traffic for the neighbourhood value). */
+  eachMover(fn: (m: Mover) => void) { for (const q of this.cells.values()) for (const m of q) fn(m); }
   /** Running totals since the world was loaded (read-only view). */
   get counters(): Readonly<TrafficCounters> { return this.cnt; }
   /** Bump one counter (the simulation reports give-ups and re-routes here). */

@@ -1,3 +1,5 @@
+import { VALUE_KINDS, VALUE_KIND_COUNT } from './value';
+
 /**
  * Issue bubbles, the problems list and the data overlays (docs/audit-2026-10.md section 4.4, server/src/sim/issues.ts,
  * client/src/render/issues.ts, client/src/problems.ts). Shared so both sides agree on the codes and the wording.
@@ -51,8 +53,15 @@ export function moodReasonOf(label: string): number {
 }
 
 /** The data overlays the server can send (message `overlay`); congestion is the traffic message's own tint. 0 is none. */
-export const Overlay = { None: 0, Coverage: 1, Leisure: 2, Happiness: 3, JobsHomes: 4, News: 5 } as const;
-export const OVERLAY_COUNT = 6;
+export const Overlay = { None: 0, Coverage: 1, Leisure: 2, Happiness: 3, JobsHomes: 4, News: 5, Neighbourhood: 6 } as const;
+/**
+ * The Neighbourhood overlay's tabs (shared/src/value.ts, docs/multiplayer-land.md section 4): Overlay.Neighbourhood is
+ * the combined value, and channel NEIGHBOURHOOD_KIND0 + k is value kind k (noise, smell, ... culture).
+ */
+export const NEIGHBOURHOOD_KIND0 = 7;
+export const OVERLAY_COUNT = NEIGHBOURHOOD_KIND0 + VALUE_KIND_COUNT;
+/** Is this overlay channel the Neighbourhood layer (the combined value or one of its kinds)? */
+export const isNeighbourhoodOverlay = (ch: number) => ch === Overlay.Neighbourhood || (ch >= NEIGHBOURHOOD_KIND0 && ch < OVERLAY_COUNT);
 export interface OverlayText { name: string; /** the legend's two ends */ lo: string; hi: string; /** 0 sequential (viridis-like), 1 diverging (blue-orange) */ ramp: 0 | 1; explain: string }
 export const OVERLAY_TEXT: Record<number, OverlayText> = {
   [Overlay.Coverage]: { name: 'coverage', lo: 'none', hi: 'police, fire and health', ramp: 0, explain: 'Police, fire and health cover from staffed stations, on every lot' },
@@ -60,7 +69,9 @@ export const OVERLAY_TEXT: Record<number, OverlayText> = {
   [Overlay.Happiness]: { name: 'happiness', lo: 'miserable', hi: 'happy', ramp: 0, explain: 'Mean happiness of the people living in each home' },
   [Overlay.News]: { name: 'news', lo: 'no channel', hi: 'rival channels', ramp: 0, explain: 'Where the media centres\' channels reach (docs/media.md): one channel, or two or more competing for the stories' },
   [Overlay.JobsHomes]: { name: 'jobs / homes', lo: 'needs jobs', hi: 'needs homes', ramp: 1, explain: 'Jobs minus residents within 8 tiles: orange has more people than work, blue more work than people' },
+  [Overlay.Neighbourhood]: { name: 'neighbourhood', lo: 'blighted', hi: 'sought after', ramp: 1, explain: 'What is near each lot, nuisance against amenity, for the average household (docs/multiplayer-land.md); pick a kind below' },
 };
+VALUE_KINDS.forEach((k, i) => { OVERLAY_TEXT[NEIGHBOURHOOD_KIND0 + i] = { name: k.name, lo: k.lo, hi: k.hi, ramp: 0, explain: k.explain }; });
 
 /** Overlay bytes: 0 is no data (water, roads, a happiness tile with nobody home); 1-255 carry the value. */
 export const overlayByte = (v01: number) => 1 + Math.round(Math.max(0, Math.min(1, v01)) * 254);

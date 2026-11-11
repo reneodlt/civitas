@@ -48,6 +48,8 @@ export abstract class Timetabled implements ModeService {
 
   constructor(protected w: World, protected transit: Transit) {}
 
+  /** Each line with trains running: its track tiles (tkey) and its trains (sim/value.ts: rail noise). */
+  eachRunning(fn: (tiles: Set<number>, trains: number) => void) { for (const l of this.byId.values()) if (l.svc && l.tiles) fn(l.tiles, l.def.trains); }
   /** The tick trains run on: the same day + fraction the clients interpolate from 'stats' (as planes do). */
   get railTick() { return this.w.day * TICKS_PER_DAY + (this.w.tick % TICKS_PER_DAY); }
 

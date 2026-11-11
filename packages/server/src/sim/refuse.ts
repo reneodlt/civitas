@@ -192,6 +192,14 @@ export class Refuse implements FleetService {
     return v;
   }
 
+  /** Homes a depot at (x, y) emptied a day, today and yesterday averaged (sim/value.ts: nuisance follows use). */
+  handledAt(x: number, y: number): number {
+    const v = this.depots.get(tkey(x, y)), day = Math.floor(this.w.tick / DAY);
+    if (!v) return 0;
+    if (v.day === day) return (v.homes + v.yHomes) / 2;
+    return v.day === day - 1 ? v.homes / 2 : 0;
+  }
+
   // ---- the lorry's side (FleetService) -----------------------------------------------------------------------------
 
   arrive(u: Unit, s: Stop) {

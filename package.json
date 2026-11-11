@@ -27,7 +27,8 @@
     "crossing:check": "tsx packages/server/src/crossing-check.ts",
     "auth:check": "tsx packages/server/src/auth-check.ts",
     "weather:check": "tsx packages/server/src/weather-check.ts",
-    "roadrules:check": "tsx packages/server/src/roadrules-check.ts"
+    "roadrules:check": "tsx packages/server/src/roadrules-check.ts",
+    "value:check": "tsx packages/server/src/value-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

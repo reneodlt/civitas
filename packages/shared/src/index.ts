@@ -49,6 +49,7 @@ export * from './boats';
 export * from './ferry';
 export * from './education';
 export * from './weather';
+export * from './value';
 export * from './policies';
 export * from './issues';
 export * from './ranks';
