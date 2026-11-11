@@ -1,8 +1,9 @@
 import {
   WEATHER_TUNING as WT, DRIVE_MIN_TILES, hash2,
-  weatherFor, setForcedWeather, isForcedWeather, darknessAt, walkMul, roadSpeedMul, collisionMul, buildMul, holdReason, weatherMood,
+  weatherFor, dayForecast, setForcedWeather, isForcedWeather, darknessAt, walkMul, roadSpeedMul, collisionMul, buildMul, holdReason, weatherMood,
   type Weather,
 } from '@msimcity/shared';
+import { TICKS_PER_DAY } from '@msimcity/shared';
 import type { World } from '../world';
 import { env } from '../env';
 
@@ -51,6 +52,26 @@ export function weatherNow(world: World): WeatherNow {
 export function driveMinFor(world: World, id: number): number {
   const s = weatherNow(world).wetDrive;
   return s > 0 && hash2(id, 79) < s ? Math.min(DRIVE_MIN_TILES, WT.driveMinWet) : DRIVE_MIN_TILES;
+}
+
+/**
+ * The seasons' hand on health (W5, docs/weather.md): today's flu multiplier (a cold day spreads it faster; the winter wave itself is
+ * `fluWave`'s) and thermal stress 0..1 (a heatwave: the day's high at or over WT.heatwaveFrom, a cold snap: the low at or under
+ * WT.coldSnapFrom), memoised per game day. `SEASONFX=0` in the environment turns the whole of W5's sim side off (the flu wave back
+ * at its early-spring peak, no stress), for A/B loadtests.
+ */
+export const SEASON_FX = env('SEASONFX') !== '0';
+const healthCache = new WeakMap<World, { day: number; fluMul: number; stress: number }>();
+export function seasonHealthNow(world: World): { fluMul: number; stress: number } {
+  const day = Math.floor(world.tick / TICKS_PER_DAY);
+  let c = healthCache.get(world);
+  if (c && c.day === day) return c;
+  const f = dayForecast(world.seed, day);
+  const cold = Math.min(1, Math.max(0, (WT.fluColdFrom - f.lo) / 8));
+  const hot = Math.min(1, Math.max(0, (f.hi - WT.heatwaveFrom) / WT.heatwaveSpan)), snap = Math.min(1, Math.max(0, (WT.coldSnapFrom - f.lo) / WT.coldSnapSpan));
+  c = { day, fluMul: 1 + WT.fluCold * cold, stress: Math.max(hot, snap) };
+  healthCache.set(world, c);
+  return c;
 }
 
 /** The weather's part of happiness now (shared weatherMood), for happinessParts. */

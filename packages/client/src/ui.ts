@@ -5,7 +5,7 @@ import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
 import { FLEET_LABEL, classDef, namesClass } from '@msimcity/shared';
-import { WEEKDAY_NAMES, type RefuseSiteInfo } from '@msimcity/shared';
+import { WEEKDAY_NAMES, seasonDate, seasonOf, type RefuseSiteInfo } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
 import { chipBalance, ledgerText, ledgerHtml } from './finance';
@@ -445,7 +445,8 @@ export class UI {
       this.clockSeen = true;
       if (this.lightMode === 'live' && (h >= 20 || h < 6) && !this.onHint?.('night')) this.toast('info', "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock");
     }
-    $('clock').innerHTML = `<b>${WEEKDAYS[day % DAYS_PER_WEEK]}</b> ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} <span style="opacity:.6">day ${day}</span>`;
+    const sd = seasonDate(seasonOf((day + frac) * TICKS_PER_DAY).phase);
+    $('clock').innerHTML = `<b>${WEEKDAYS[day % DAYS_PER_WEEK]}</b> ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} <span style="opacity:.6" title="${sd.label}, ${sd.day} ${sd.month} (a game week is a year)">day ${day}</span>`;
   }
   setWorldStats(s: { population: number; jobs: number; employed: number; moving: number; driving: number; outAndAbout: number; sites: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; migIn?: number; migOut?: number; migWaiting?: number; fund?: number }, players: number) {
     // players < 0: a local game, nobody else online

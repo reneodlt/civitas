@@ -8,6 +8,7 @@ import type { Building, Citizen, World } from '../world';
 import { noteIncome, ageOf, deathChance, HEALTH, MOODS } from './life';
 import type { Mobile, FleetService, Unit, Stop } from './mobile';
 import type { FireHarm } from './fires';
+import { seasonHealthNow, SEASON_FX } from './weatherfx';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR, S = CitizenState;
 /** a funeral trip's errand (Simulation.funeralTrip): there for the service, then home */
@@ -161,7 +162,7 @@ export class Death implements FleetService {
    * the day). True when c died: they are gone from the world.
    */
   lifeRoll(c: Citizen, age: number): boolean {
-    const w = this.w, p = deathChance(age, c.health);
+    const w = this.w, p = deathChance(age, c.health, SEASON_FX ? seasonHealthNow(w).stress : 0); // a heatwave or cold snap is harder on the elderly (W5)
     if (p > 0 && Math.random() < p) {
       const cause = c.health < HEALTH.poorHealthBelow ? Cause.Illness : Cause.OldAge;
       if (!DEATH.on) { this.count(cause); w.removeCitizen(c); return true; }

@@ -3,6 +3,7 @@ import { CHUNK_SIZE, isRoad, zoneOf, levelOf, hash2, leisureAt, kindIdOf, type A
 import type { ClientChunk } from '../world';
 import { Kit } from './kit';
 import { VenueLights } from './nightlife';
+import { leafMaterial, leafDepthMaterial } from './seasons';
 
 /**
  * Trees and benches inside park tiles, as instances (not building models), so a city full of parks costs a few
@@ -112,15 +113,18 @@ class ParkMeshes {
   broadleaf: InstancedMesh; conifer: InstancedMesh; benches: InstancedMesh;
   constructor(trees: number, benches: number) {
     const mat = new MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    const mk = (g: BufferGeometry, n: number) => {
-      const m = new InstancedMesh(g, mat, n);
+    // broadleaf trees go through the year (render/seasons.ts); conifers stay green and only take snow
+    const broadOpts = { crownY: 0.17, above: 0.09 }, coniferOpts = { crownY: 0.14, above: 0.09, evergreen: true };
+    const mk = (g: BufferGeometry, n: number, o?: typeof broadOpts | typeof coniferOpts) => {
+      const m = new InstancedMesh(g, o ? leafMaterial(o) : mat, n);
+      if (o) { const d = leafDepthMaterial(o); if (d) m.customDepthMaterial = d; }
       m.count = 0; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true;
       m.instanceMatrix.setUsage(DynamicDrawUsage);
       this.group.add(m);
       return m;
     };
-    this.broadleaf = mk(broadleafGeometry(), trees);
-    this.conifer = mk(coniferGeometry(), trees);
+    this.broadleaf = mk(broadleafGeometry(), trees, broadOpts);
+    this.conifer = mk(coniferGeometry(), trees, coniferOpts);
     this.benches = mk(benchGeometry(), benches);
     this.benches.castShadow = false;
   }

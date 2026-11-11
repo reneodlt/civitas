@@ -2,6 +2,7 @@ import { DirectionalLight, HemisphereLight, Color, Scene, Vector3 } from 'three'
 import { sceneUniforms } from './materials';
 import { Celestial } from './celestial';
 import { sunAt, sunDeclination } from '@msimcity/shared';
+import { grassFor } from './seasons';
 
 const DAY_SKY = new Color(0x9fc4e8), DUSK_SKY = new Color(0xe09a66), BLUE_HOUR = new Color(0x2c3f72), NIGHT_SKY = new Color(0x0c1428);
 const SUN_WARM = new Color(0xffa95c), SUN_WHITE = new Color(0xfff3e0), MOON = new Color(0x7f93d0);
@@ -13,6 +14,20 @@ const UP = new Vector3(0, 1, 0);
 /** a year phase with 12 hours of day (thumbnails and anything without a clock) */
 const EQUINOX = equinoxPhase();
 function equinoxPhase() { let best = 0, bd = Infinity; for (let p = 0; p < 0.5; p += 0.001) { const d = Math.abs(sunDeclination(p)); if (d < bd) { bd = d; best = p; } } return best; }
+/**
+ * The hour the evening darkness falls on a day of the year: the sun 3 degrees up on its way down (sin 0.052), so street lamps and lit
+ * windows follow the season (about 15:45 at midwinter, 20:15 at midsummer) instead of a clock hour. Bisected over the afternoon,
+ * cached while the phase is within 0.002 (a quarter of a game hour).
+ */
+let duskPhase = -1, duskHour = 18;
+const DUSK_ELEV = Math.sin((3 * Math.PI) / 180);
+export function duskHourAt(phase: number): number {
+  if (Math.abs(phase - duskPhase) < 0.002) return duskHour;
+  let lo = 12, hi = 24;
+  for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (sunAt(phase, mid).elev > DUSK_ELEV) lo = mid; else hi = mid; }
+  duskPhase = phase; duskHour = (lo + hi) / 2;
+  return duskHour;
+}
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /**
@@ -111,6 +126,10 @@ export class Lighting {
     this.sky.copy(this.tmp).lerp(BLUE_HOUR, blue * 0.6);
     sceneUniforms.uNight.value = 1 - smooth(-0.12, 0.1, elev);
     sceneUniforms.uHour.value = h;
+    sceneUniforms.uElev.value = elev;
+    sceneUniforms.uDusk.value = duskHourAt(yearPhase);
+    sceneUniforms.uYear.value = yearPhase;
+    grassFor(yearPhase, sceneUniforms.uGrass.value);
     sceneUniforms.uTime.value = performance.now() / 1000;
 
     // weather: cloud greys the sky and the sky's light and diffuses the sun (shadows fade with it: the hemisphere light fills them in),
