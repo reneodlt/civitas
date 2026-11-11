@@ -24,7 +24,8 @@
     "parcels:check": "tsx packages/server/src/parcels-check.ts",
     "finance:check": "tsx packages/server/src/finance-check.ts",
     "perf:check": "tsx packages/server/src/loadtest/perf-check.ts",
-    "crossing:check": "tsx packages/server/src/crossing-check.ts"
+    "crossing:check": "tsx packages/server/src/crossing-check.ts",
+    "auth:check": "tsx packages/server/src/auth-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

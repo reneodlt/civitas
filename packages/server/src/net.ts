@@ -83,6 +83,24 @@ export interface GameConfig {
   /** a read-only showcase (SPECTATE=1, docs/demo.md "A public showcase"): only the READ_ONLY intents are answered, every other one
    *  is refused with a toast; no onboarding, and a visitor's player record goes again when they leave */
   spectate?: boolean;
+  /** sign-in (auth.ts, docs/accounts.md): when set, a hello must carry a session token, and the account it names decides the
+   *  player; the name typed is used only once, to make an account's mayor. Left out: the name is the identity, as before. */
+  auth?: AuthHook;
+}
+/** Who a session token says is signing in: the identity provider's user id. */
+export interface AuthIdentity { sub: string; email?: string }
+/** Sign-in as net.ts sees it; the host supplies it (auth.ts for Hanko). Kept to an interface so this file still runs in a worker. */
+export interface AuthHook {
+  /** the token's identity, or null for a token that is missing its signature, expired or forged */
+  verify(token: string): Promise<AuthIdentity | null>;
+  /** the player an account is bound to, and the mayor name it chose */
+  accountOf(sub: string): { player: string; name: string } | undefined;
+  /** the account holding a player id, if any */
+  holderOf(player: string): string | undefined;
+  /** binds an account to a player for good */
+  bind(who: AuthIdentity, player: string, name: string): void;
+  /** a player made before sign-in (no account holds it) may be taken by the first account that asks for its name */
+  claimExisting: boolean;
 }
 /**
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
@@ -204,7 +222,7 @@ export class Net {
   // ---- inbound ---------------------------------------------------------------
 
   private handle(c: Client, m: ClientMsg) {
-    if (m.t === 'hello') return this.hello(c, m.name);
+    if (m.t === 'hello') return this.cfg.auth ? void this.signedHello(c, this.cfg.auth, m.name, m.token) : this.hello(c, m.name);
     if (m.t === 'ping') return this.send(c, { t: 'pong', n: m.n });
     if (!c.player) return;
     if (this.cfg.spectate && !READ_ONLY.has(m.t)) return this.toast(c, SPECTATE_REFUSAL);
@@ -311,10 +329,39 @@ export class Net {
   }
 
   private hello(c: Client, rawName: string) {
+    const n = this.nameAndId(rawName);
+    if (typeof n === 'string') return this.toast(c, n);
+    this.enter(c, n.id, n.name);
+  }
+  /** A typed mayor name and its player id, or why it cannot be one. */
+  private nameAndId(rawName: unknown): { name: string; id: string } | string {
     const name = String(rawName ?? '').trim().slice(0, 20);
-    if (!name) return this.toast(c, 'Name required');
+    if (!name) return 'Name required';
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    if (id === 'sys') return this.toast(c, 'That name is reserved');
+    if (id === 'sys' || !id.replace(/-/g, '')) return 'That name is reserved';
+    return { name, id };
+  }
+  /**
+   * A hello on a server with sign-in (docs/accounts.md): the token decides who this is. A bound account enters as its player
+   * whatever name was typed; a new account needs a name no other account holds, which binds it. Every refusal is an `auth`
+   * message telling the page what to ask for next (sign in again, or a name).
+   */
+  private async signedHello(c: Client, auth: AuthHook, rawName: string, token: unknown) {
+    if (typeof token !== 'string' || !token) return this.send(c, { t: 'auth', need: 'signIn' });
+    const who = await auth.verify(token);
+    if (!c.conn.open) return; // gone while the token was checked
+    if (!who) return this.send(c, { t: 'auth', need: 'signIn', msg: 'Your sign-in has expired. Please sign in again.' });
+    const acc = auth.accountOf(who.sub);
+    if (acc) return this.enter(c, acc.player, acc.name);
+    if (!String(rawName ?? '').trim()) return this.send(c, { t: 'auth', need: 'name' });
+    const n = this.nameAndId(rawName);
+    if (typeof n === 'string') return this.send(c, { t: 'auth', need: 'name', msg: n });
+    if (auth.holderOf(n.id) || (this.w.players.has(n.id) && !auth.claimExisting)) return this.send(c, { t: 'auth', need: 'name', msg: 'That mayor name is taken. Please choose another.' });
+    auth.bind(who, n.id, n.name);
+    this.enter(c, n.id, n.name);
+  }
+  /** The player joins as `id` (made with `name` if new): the welcome and everything a new screen needs. */
+  private enter(c: Client, id: string, name: string) {
     if (this.cfg.spectate && !this.w.players.has(id)) this.visitors.add(id);
     const newcomer = !this.w.players.has(id);
     c.player = this.w.getOrCreatePlayer(id, name, this.w.start === 'frontier' ? FRONTIER_MONEY : START_MONEY);
