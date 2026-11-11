@@ -629,6 +629,10 @@ export class UI {
         const l = info.leisure, what = [l.parks ? `${l.parks} park${l.parks === 1 ? '' : 's'}` : '', l.venues ? `${l.venues} venue${l.venues === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
         html += row('Leisure coverage', `${esc(l.label)}${what ? ` (${what})` : ''}`);
       }
+      if (info.hood) { // the neighbourhood value (docs/multiplayer-land.md section 4; the Neighbourhood overlay)
+        const h = info.hood, bits = [h.nuisance ? `${esc(h.nuisance[0])} ${h.nuisance[1]}%` : '', h.amenity ? `${esc(h.amenity[0])} ${h.amenity[1]}%` : ''].filter(Boolean).join(' · ');
+        html += row('Neighbourhood', `${h.value.toFixed(2)}×${bits ? ` (${bits})` : ''}`);
+      }
     }
     if (info.focus) html += focusHtml(info.focus);
     if (info.workers && !((info.venue || info.gateway) && info.capacity === 0)) { // a park or a motorway connection has no staff

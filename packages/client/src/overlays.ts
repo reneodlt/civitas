@@ -1,14 +1,15 @@
-import { Overlay, OVERLAY_TEXT, ROAD_CLASS_DEFS } from '@msimcity/shared';
+import { Overlay, OVERLAY_TEXT, ROAD_CLASS_DEFS, NEIGHBOURHOOD_KIND0, VALUE_KINDS, isNeighbourhoodOverlay } from '@msimcity/shared';
 
 /**
  * The overlays menu (docs/audit-2026-10.md section 4.4) on the top bar's overlay chip and the H key: traffic congestion
  * (the roads' own tint from the traffic bytes) and the server's data overlays (shared/src/issues.ts Overlay: service
  * coverage, leisure, happiness, jobs against homes, news reach), each with its legend. H cycles congestion, coverage, leisure,
- * happiness, jobs/homes, news, off; the chip opens a small menu to pick one. Ramps are colour-blind safe: viridis for the
+ * happiness, jobs/homes, news, neighbourhood, power, off; the chip opens a small menu to pick one. The Neighbourhood layer
+ * (shared/src/value.ts, docs/multiplayer-land.md section 4) has a tab per kind of nuisance and amenity under its row. Ramps are colour-blind safe: viridis for the
  * sequential ones, blue against orange for jobs/homes (render/materials.ts).
  */
 export type OverlayMode = 'off' | 'traffic' | 'roads' | 'power' | number;
-const CYCLE: OverlayMode[] = ['traffic', 'roads', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, 'power', 'off'];
+const CYCLE: OverlayMode[] = ['traffic', 'roads', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, Overlay.Neighbourhood, 'power', 'off'];
 /** legend gradients matching the shaders (render/materials.ts mscViridis, mscDiverge, HEAT) */
 const VIRIDIS = 'linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725)';
 const DIVERGE = 'linear-gradient(90deg, #e6750d, #eeebdb, #2166cc)';
@@ -40,7 +41,7 @@ export class OverlayMenu {
   constructor(private d: OverlayDeps) {
     injectStyle();
     this.chip = document.getElementById('heat') as HTMLButtonElement;
-    this.chip.title = 'Overlays: traffic, service coverage, leisure, happiness, jobs against homes (H cycles them)';
+    this.chip.title = 'Overlays: traffic, service coverage, leisure, happiness, jobs against homes, neighbourhood (H cycles them)';
     this.chip.onclick = (e) => { e.stopPropagation(); this.menu.classList.toggle('hidden'); this.renderMenu(); };
     this.menu = document.createElement('div');
     this.menu.id = 'ovlMenu'; this.menu.className = 'hidden';
@@ -57,7 +58,7 @@ export class OverlayMenu {
   }
 
   /** H: the next overlay in the cycle. */
-  cycle() { const i = CYCLE.indexOf(this.mode); this.set(CYCLE[(i + 1) % CYCLE.length]); }
+  cycle() { const i = CYCLE.indexOf(typeof this.mode === 'number' && isNeighbourhoodOverlay(this.mode) ? Overlay.Neighbourhood : this.mode); this.set(CYCLE[(i + 1) % CYCLE.length]); }
 
   set(mode: OverlayMode) {
     this.mode = mode;
@@ -94,6 +95,15 @@ export class OverlayMenu {
     if (this.d.trafficPanel) html += `<button class="orow" data-panel="traffic"><span class="oname">Traffic panel…</span><span class="oexp">Who is on the roads (residents, visitors, lorries), arrivals by gateway, the worst junctions and the longest queues</span></button>`;
     html += row('roads', 'lane · street · one-way', 'avenue · motorway · pedestrian', 'Roads by class: country lane, street, one-way street, avenue, motorway, pedestrian street (docs/roads.md)');
     for (const ch of [Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News]) { const t = OVERLAY_TEXT[ch]; html += row(ch, t.lo, t.hi, t.explain); }
+    // the Neighbourhood layer: the combined value, and while it (or a kind) is on, a tab per kind with that kind's legend
+    const hood = typeof this.mode === 'number' && isNeighbourhoodOverlay(this.mode);
+    if (hood && this.mode !== Overlay.Neighbourhood) { const t = OVERLAY_TEXT[this.mode as number]; html += row(this.mode, t.lo, t.hi, t.explain); }
+    else { const t = OVERLAY_TEXT[Overlay.Neighbourhood]; html += row(Overlay.Neighbourhood, t.lo, t.hi, t.explain); }
+    if (hood) {
+      html += `<div class="otabs"><button class="otab${this.mode === Overlay.Neighbourhood ? ' sel' : ''}" data-mode="${Overlay.Neighbourhood}">value</button>`;
+      VALUE_KINDS.forEach((k, i) => { const ch = NEIGHBOURHOOD_KIND0 + i; html += `<button class="otab${this.mode === ch ? ' sel' : ''}${k.nuisance ? ' bad' : ''}" data-mode="${ch}" title="${k.explain}">${k.key}</button>`; });
+      html += '</div>';
+    }
     html += row('power', 'supplied', 'no supply', 'Streets by their substation: supplied, brownout, cut or fault, or a substation with no supply (docs/utilities.md)');
     html += row('off', '', '', 'No overlay');
     this.menu.innerHTML = html;
@@ -117,6 +127,10 @@ function injectStyle() {
 #ovlMenu .olegend span { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; }
 #ovlMenu .olegend em { font-style: normal; }
 #ovlMenu .oexp { color: var(--muted); font-size: 11px; line-height: 1.3; }
+#ovlMenu .otabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 6px 4px; }
+#ovlMenu .otab { padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: inherit; font-size: 10.5px; cursor: pointer; }
+#ovlMenu .otab.bad { color: #f0a070; }
+#ovlMenu .otab.sel { border-color: rgba(98,210,162,0.7); background: rgba(98,210,162,0.15); }
 `;
   document.head.appendChild(style);
 }

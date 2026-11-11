@@ -331,3 +331,67 @@ demand; test with two or three player bots before tuning numbers.
 
 Still open, for the phases that need them: the empty-land tax rate, the boundary limit per kind, the plan-size scale of
 the spending cap, the adoption threshold for shared roads, and the abandoned-land periods. All are tuning, set in M2-M5.
+
+## Built: M1 value field (2026-11-11)
+
+Step 1 only: value steers who moves where and how tall a neighbourhood grows. No money changes hands.
+
+**What landed.**
+- `shared/src/value.ts`: the eleven kinds (`ValueKind`, `VALUE_KINDS` with labels and legends), the `VALUE` tuning object
+  (spreads, emissions, weights, home and ambition terms), `VALUE_BY_MOTIVE` (the six motivation values to kind weights:
+  Family x2.2 hazard, x2.0 disorder; Adventure x0.3 noise; Status x1.8 eyesore, x2.2 culture; Time x1.8 access, x1.5 quiet;
+  Money a little less of everything), `valueWeights`, `AVERAGE_VALUE_WEIGHTS`, `combineValue` (the section 4 formula,
+  saturate x/(1+x), each nuisance cut capped at 0.9), the spread kernels per seed (`valueKernels`: round, or a plume from
+  `climateOf(seed).rose`, long downwind and short upwind, a strong-wind bin reaching further; noise is 30% plume), and the
+  industrial models' noise, pollution and hazard (chemicals, fuel) from the catalogue.
+- `server/src/sim/value.ts` (`ValueField`, owned by `Simulation` as `sim.value`): bytes per 4×4 cell (12 a cell: the
+  eleven kinds and the published value), per-chunk cache. Once a game hour it measures use, builds an emission grid
+  quantised on a log scale (about 13% a step), and recomputes only the chunks within reach of an emission that changed
+  (plus new chunks and every chunk when services move). Targets are modified chunks and the ring round them. Nothing runs
+  per tick per tile; traffic is sampled every 10 ticks (vehicles and lorries/buses per cell).
+- Nuisance follows use: works by workers on shift (smoothed hourly), times the model's noise and pollution; refuse depots
+  by homes emptied (`Refuse.handledAt`); power plants by staff share times `UTIL_POLLUTION_OF`; roads by measured vehicles
+  and heavy vehicles; rail by running lines' track tiles and trains (`Timetabled.eachRunning`); airports by flights an hour
+  at three points on the runway; late venues by guests at 22:00-04:00; buildings empty 12 hours give disorder and eyesore.
+  Mothballed buildings give nothing. Police cover takes up to 60% of disorder off. Amenities: open land and parks (green),
+  jobs, shops and stops (`Transit.eachStop`) (access), staffed coverage (services), landmarks, theatres, cinemas,
+  libraries and buildings above level 4 (culture). Quiet = 255 - max(noise, heavy traffic). Owner-blind: own land is hit
+  as hard as a neighbour's.
+- Effects: `Motivation.hoodTerm` in `homeScore`, `VALUE.homeTerm` (0.45) x clamp(1.2 x ln(value there / value here)) with
+  the household's own weights; `Simulation.ambition` + `ValueField.ambitionDelta`: -1 where the average household's
+  nuisances leave under 0.62 of value, +1 where value is over 1.75, never more than one level either way.
+  `VALUE=0` keeps the field but turns both effects off (A/B).
+- Client: the overlays menu has a Neighbourhood row (channel `Overlay.Neighbourhood`, combined value on the diverging
+  ramp) and, while it is on, a tab per kind (channels `NEIGHBOURHOOD_KIND0 + k`). It goes through the existing data-overlay
+  path (`server/src/overlays.ts`, per-tile bytes for subscribed chunks, re-sent only when a chunk's hash changes), so no
+  new message. A home's tooltip has a Neighbourhood row: value, worst nuisance, best amenity.
+- Snapshot: nothing new; a loaded world rebuilds the field at its first hourly pass (checked).
+- `npm run value:check` (`server/src/value-check.ts`), `server/src/loadtest/value-probe.ts` (A/B probe).
+
+**Measured.**
+- value:check: idle depot 0, busy depot (60 homes a day) 0.77 smell at its cell; works with 40 on shift noise 0.92, none 0;
+  mothballed 0. Seed 4242: smell reaches 48 tiles downwind and 6 upwind; kernel weight downwind/upwind 2.61/1.79 (noise),
+  22.1/1.22 (smell), equal (eyesore). Own and neighbour cells either side of a depot 0.49/0.49. A Family household's home
+  term prefers the quiet home more than an adventurous one's. Deterministic; a settled field recomputes nothing.
+- Cost: 6x6 test city (6,937 buildings, 14,400 citizens): 7-8 ms a pass once settled (63 of 64 chunks still changing
+  in the first hours), 21-23 ms for the first pass (all chunks new); a full rebuild 10-20 ms. That is once a game hour,
+  so about 0.1 ms a tick amortised, but one tick an hour carries it.
+- Motivation loadtest (2x2, 5 days, VALUE=0 against on): all 29 checks pass both ways; moves of their own accord 0.043% to
+  0.071% of households a day (6 to 10 moves), job changes 0.043% to 0.049%; wage and commute effects unchanged.
+- value-probe (3x3, 4 days, first tuning, roadNoise 0.12): population 4,949 off / 4,867 on, all levels 2,223 / 2,212, merged
+  28 / 28, moves 15 / 20. Ambition was cut a level at 168 of 665 homes and noise was over 50% at 576 homes. The dense test
+  grid saturated noise, so road noise was lowered (roadNoise 0.12 to 0.04, heavyNoise 0.2 to 0.1, heavyTraffic 0.6 to 0.4).
+  With the new tuning: population 4,949 off / 4,971 on, all levels 2,223 / 2,190, merged 28 / 30, moves 15 / 17;
+  ambition -1 at 97 homes and +1 at 39 of 656; noise over 50% at 243 homes; 6.1 ms a pass on the 3x3 city.
+- perf:check ran while two probes loaded the machine (load 3.9 on 4 cores), so its timing failures are not meaningful.
+  The plan phase (which now includes the hourly pass) was 5.1% of the tick against 3.4%. Re-run on a quiet machine, then
+  `--update` once accepted (the game hash changes, since moves and growth now read the field).
+
+**Deviations.**
+- Quiet is stored as a byte like the others, though it is derived each pass. Access counts jobs, shops and stops by
+  distance, not along the street network. Heavy traffic is per cell from sampled vehicles, spread 6 tiles round, not
+  along the roads. Noise is not yet blocked by buildings or tree belts.
+- "Spreads evenly over the builder's own land" is read as owner-blind spread (your land suffers as a neighbour's does),
+  not an extra share smeared over the whole parcel.
+- Overlay chunks go as per-tile bytes on the existing overlay message (4x4 cells expanded), not a new cell-byte message.
+- Depot use is today and yesterday averaged, so a depot's smell fades over a weekend without collections.

@@ -1,11 +1,12 @@
 import {
   LifeStage, Zone, CitizenState, TICKS_PER_DAY, TICKS_PER_HOUR, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, OCCUPATIONS, wageOf, wageMul, skillNeed,
-  valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo,
+  valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo, VALUE, valueWeights,
 } from '@msimcity/shared';
 import type { Building, Citizen, World } from '../world';
 import { ageOf } from './life';
 import { Place } from './skills';
 import { env } from '../env';
+import { VALUE_FIELD } from './value';
 
 /**
  * Motivation M1-M2 (docs/motivation.md): citizens' values and the decisions they score with them.
@@ -51,6 +52,8 @@ export interface MotiveHost {
   moveHome(c: Citizen, b: Building, hh: number): void;
   /** may a household move into b (road access, not the camp) */
   homeOk(b: Building): boolean;
+  /** the neighbourhood value at a tile for these kind weights (sim/value.ts; 1 where nothing is near) */
+  value?(x: number, y: number, weights: ArrayLike<number>): number;
 }
 
 /** One job candidate's facts, for scoring against the others. */
@@ -230,7 +233,9 @@ export class Motivation {
    * How a home suits a household (docs/motivation.md section 5), relative to where they live now (whose own score is
    * the Roots of staying put): Money the parcel's tax, Family services, parks and a spare bed, Status the building,
    * Roots staying near (the old home is where friends and family are), Time the walk to work, Adventure somewhere
-   * new. `d` is the Manhattan distance from the current home; `need` the beds the household takes.
+   * new. `d` is the Manhattan distance from the current home; `need` the beds the household takes. The neighbourhood
+   * value (docs/multiplayer-land.md section 4, step 1) adds a term: the value at b against the current home's, both
+   * with the household's own kind weights (shared valueWeights: a Family-minded household minds hazard and disorder).
    */
   homeScore(c: Citizen, w: readonly number[], host: MotiveHost, from: Building | undefined, b: Building, d: number, need: number): number {
     const W = this.w, R = MOTIVE.moveRadius;
@@ -247,7 +252,16 @@ export class Motivation {
       + w[Value.Roots] * (clamp(-d / R) + (same ? 0.3 : 0))
       + w[Value.Time] * clamp(-1.5 * work / R)
       + w[Value.Adventure] * (clamp(d / R) + (same ? 0 : 0.2))
+      + this.hoodTerm(w, host, from, b)
       - 0.1 * d / R; // moving is a bother
+  }
+  private kw = new Float64Array(11);
+  /** The neighbourhood value term of homeScore: VALUE.homeTerm × the log of b's value over the current home's, pressed and clamped. */
+  hoodTerm(w: readonly number[], host: MotiveHost, from: Building | undefined, b: Building): number {
+    if (!host.value || !from || !VALUE_FIELD.on) return 0;
+    const kw = valueWeights(w, this.kw);
+    const vb = host.value(b.x, b.y, kw), vf = host.value(from.x, from.y, kw);
+    return VALUE.homeTerm * clamp(VALUE.homeGain * Math.log(Math.max(0.05, vb) / Math.max(0.05, vf)));
   }
 
   /**
