@@ -68,6 +68,8 @@ export interface Snapshot {
    * [x, y, bits]); optional, absent in older saves and while the fund is untouched and no site has an add-on
    */
   refuse?: { fund: number; levied: number; paid: number; short: number; addons?: [number, number, number][] };
+  /** planning applications, refused designs and approved conditions (sim/planning.ts PlanningSave, docs/multiplayer-land.md M5); optional, absent in older saves and while there are none */
+  planning?: object;
 }
 export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
@@ -107,6 +109,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.newsSave ? newsField(w.newsSave()) : {}),
     ...(w.deathSave ? deathField(w.deathSave()) : {}),
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
+    ...(w.planningSave ? planningField(w.planningSave()) : {}),
   };
 }
 
@@ -120,6 +123,9 @@ const newsField = (n: NewsSave) => (n.stories.length ? { news: n } : {});
 const deathField = (d: DeathSave) => (d.dead.length || d.grief.length || Object.keys(d.first).length ? { death: d } : {});
 /** The utilities field, left out while there are no links, faults or settings (so a save without them is as before). */
 const utilitiesField = (u: UtilitiesSave | null) => (u ? { utilities: u } : {});
+
+/** The planning field, left out while there is nothing to keep (so a save without planning is as before). */
+const planningField = (p: object | null) => (p ? { planning: p } : {});
 
 /** Whether this build can read a snapshot of that format (the current one, or one it upgrades in place). */
 export const readableVersion = (version: number | undefined) => version === VERSION || UPGRADES_FROM.includes(version as number);
@@ -183,6 +189,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.news && typeof snap.news === 'object') w.newsLoaded = snap.news;
   if (snap.death && typeof snap.death === 'object') w.deathLoaded = snap.death;
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
+  if (snap.planning && typeof snap.planning === 'object') w.planningLoaded = snap.planning;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

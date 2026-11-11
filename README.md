@@ -181,7 +181,8 @@ Roads can be laid on unclaimed land too (at a premium) so parcels can be joined
 up: you pay that public road's upkeep, it fades if nothing uses it for five days,
 other players' daily traffic on it gets it adopted (you stop paying), and nobody
 may bulldoze a public road another player depends on (docs/multiplayer-land.md
-"Built: M3 roads"); zoning needs land you own. Nothing gets built until builders can reach it:
+"Built: M3 roads"), though they may give a closure notice that goes through if no affected mayor objects within a game
+day (M5); zoning needs land you own. Nothing gets built until builders can reach it:
 connect to a road network that has a builders' yard, or place your own (your
 first opens at once; later ones are built at urgent priority by whichever
 builders can reach it). Once a game hour the server tells an owner with eight or
@@ -430,6 +431,15 @@ changing behaviour in game time.
   upkeep), and the cleaner grades sell materials, gas or power back. A site's panel fits add-ons (an enclosure,
   screening, restricted hours) and shows what it pushes onto other owners' land against the boundary limits; a site
   that would push more than the limit onto someone else's land is refused, and the ghost says so before the click.
+  *Planning* (docs/multiplayer-land.md "Built: M5"; shared worlds only): a site within the limits that still reaches
+  someone else's land over the planning threshold is filed for a residents' vote instead of placed. The money is held,
+  a notice board goes up on the site, the neighbours get a toast and the local news a story; a game day later the
+  residents of the impact zone (the roll is frozen at filing) vote by what it would do to their own home, word of mouth,
+  the applicant's community offer and the jobs, opponents turning out more readily. Approved, it is built with its
+  conditions (add-ons that can no longer come off) and the offer is paid to the affected owners; refused, the money comes
+  back and the site cools off, then needs a cleaner design. The **Planning** chip opens the panel: open applications,
+  their impact by kind, time left, conditions and offer; the applicant adds conditions, raises the offer or withdraws.
+  `server/src/sim/planning.ts`, `shared/src/planning.ts`, `client/src/planning.ts`; `npm run planning:check`.
   A citizen without a car (or out for the night) weighs a taxi against walking, the bus and driving; homes order food
   at lunch and dinner and get parcels. The workers keep their ordinary jobs, so jobs and housing stay balanced; fares,
   meals, collection fees and parcel fees go to the owners. Tooltips show cab offices, takeaways and depots at work and
@@ -652,14 +662,15 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 - Selling parcels to other players (land is priced by its neighbourhood value on the shared world, docs/multiplayer-land.md
   M2; subdividing and combining are on the world map), utilities, avenues and transit,
   and a proper economy loop for commercial/industrial income. Designed in docs/multiplayer-land.md: neighbourhood value
-  (nuisance and amenity), planning votes and campaigns, service contracts between players, a land market.
+  (nuisance and amenity), planning votes (built: M5) and campaigns on plans, service contracts between players, a land market.
 - Weather and seasons (docs/weather.md): a seeded world weather with a prevailing wind, a season cycle each game week,
   storms and floods.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
 - Griefing controls, the rest: public roads are no longer anyone's to bulldoze (M3, docs/multiplayer-land.md "Built: M3
   roads": the builder pays a public road's upkeep, unused public road fades, road other players use daily is adopted,
   and a public road other players depend on cannot be taken up), and the landfill levy's regional fund pays adopted roads'
-  upkeep (M4). Still to come: closure notices with objections (M5), cheap tracks and frontage contributions.
+  upkeep (M4), and a protected road can be closed by a notice nobody objects to (M5). Still to come: cheap tracks and
+  frontage contributions.
 
 ## Licence and contributing
 

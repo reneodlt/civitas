@@ -15,6 +15,7 @@ import {
   planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
   STREET_RULE_BY_ID, StreetRule, isStreetRuleId, busLaneProblem, GATEWAY_OF, MOTORWAY_KIND, VISITOR_LIMIT_SHARE,
   refuseGradeOf, boundaryImpact, boundaryRefusal, REFUSE_ADDON_BY_ID,
+  conditionBits, PLANNING, planImpact, planningSourceOf, type Placed,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -35,6 +36,7 @@ import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
 import type { News } from './sim/news';
+import { buildCost, type Planning } from './sim/planning';
 import type { Utilities } from './sim/utilities';
 import { Overlays } from './overlays';
 import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
@@ -94,6 +96,8 @@ export interface GameConfig {
    *  for new players, land priced by value, outposts, the empty-land tax, abandoned land. game.ts ignores it on a frontier,
    *  a sandbox or a showcase. Left out: the classic rules (START_MONEY, the flat LAND_PRICE_PER_TILE, adjacent land). */
   market?: boolean;
+  /** planning votes on nuisance builds (docs/multiplayer-land.md M5, sim/planning.ts): on with `market` unless set; never in a sandbox or a showcase */
+  planning?: boolean;
 }
 /** Who a session token says is signing in: the identity provider's user id. */
 export interface AuthIdentity { sub: string; email?: string }
@@ -164,6 +168,10 @@ export class Net {
   adverts: Adverts | null = null;
   /** the news story log (sim/news.ts): the 'news' message, media centres' building panels, the news overlay; set by game.ts */
   news: News | null = null;
+  /** planning notices and the residents' vote, road closure notices (sim/planning.ts, docs/multiplayer-land.md M5); set by game.ts */
+  planning: Planning | null = null;
+  /** the conditions and offer of the build being handled (ClientMsg build `plan`), for a filing it may turn into */
+  private filing: { conditions?: unknown; offer?: unknown } | undefined;
   /** utilities (sim/utilities.ts): the power networks' state and links, the link tools, the node settings, the building panel; set by game.ts */
   utilities: Utilities | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
@@ -250,13 +258,17 @@ export class Net {
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h, m.q);
       case 'build':
         if (m.tool === 'road') return this.road(c, m.tiles, this.cfg.devTools && m.dev === true, typeof m.cls === 'number' ? m.cls : 0, m.demolish === true);
-        return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
+        if (m.under === true && m.tool === 'bulldoze') return this.fillTunnels(c, m.tiles);
+        this.filing = m.plan && typeof m.plan === 'object' ? m.plan : undefined; // a nuisance build may go to planning with these (M5)
+        try { return this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined); } finally { this.filing = undefined; }
       case 'undoRoad': return this.undoRoad(c);
       case 'streetRule': return this.streetRule(c, m.rule, m.tiles, m.on === true, this.cfg.devTools && m.dev === true);
       case 'undoStreetRule': return this.undoStreetRule(c);
       case 'ruleProbe': return this.send(c, { t: 'ruleProbe', seq: Number(m.seq) || 0, ...this.ruleProbe(m.tiles) });
       case 'gatewayLimit': return this.gatewayLimit(c, Math.floor(Number(m.x)), Math.floor(Number(m.y)), m.on === true);
       case 'refuseAddon': return this.refuseAddon(c, Math.floor(Number(m.x)), Math.floor(Number(m.y)), String(m.addon), m.on === true);
+      case 'planningAct': return this.planningAct(c, Number(m.id), m.act, m.conditions, m.offer);
+      case 'closureNotice': return this.closureNotice(c, m.tiles);
       case 'trafficPanel': return this.send(c, { t: 'trafficPanel', info: this.sim.control.panel(c.player.id, (o) => this.mayEdit(c.player!, o)) });
       case 'jamWhy': { const cx = Math.floor(Number(m.cx)), cy = Math.floor(Number(m.cy)); if (!Number.isFinite(cx) || !Number.isFinite(cy)) return; return this.send(c, { t: 'jamWhy', cx, cy, u: this.sim.control.jamWhy(cx, cy, (mv) => (mv as { leg?: { arrive?: string } | null }).leg?.arrive === 'parkLot') }); }
       case 'renameStreet': return this.renameStreet(c, m.x, m.y, m.ns === true, m.name);
@@ -406,6 +418,7 @@ export class Net {
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
+    if (this.planning) this.send(c, { t: 'planning', apps: this.planning.dtos(), ...(this.planning.on ? { votes: true } : {}) });
     this.send(c, { t: 'graves', list: this.sim.death.graves() });
     this.send(c, { t: 'roadRules', r: this.w.roadRulesList() });
     { const u = this.sim.traffic.walksList(); if (u.length) this.send(c, { t: 'walks', u }); }
@@ -678,7 +691,11 @@ export class Net {
     if (tool === 'pelican') return this.pelican(c, tiles, dev);
     if (tool === 'bulldoze') {
       const why = this.publicRoadRefusal(p, tiles);
-      if (why) return this.toast(c, why);
+      if (why) {
+        // a protected road may still go after a closure notice nobody objects to (M5): the client offers to file one
+        if (this.planning) this.send(c, { t: 'closureOffer', tiles: this.publicRoadTiles(tiles), why });
+        return this.toast(c, this.planning ? `${why}, or give a closure notice the mayors who depend on it may object to` : why);
+      }
     }
     let spent = 0, zoned = false;
     const recount = new Set<number>();
@@ -710,6 +727,7 @@ export class Net {
       let apply: () => void;
       const need = dev ? null : this.locked(p, tool);
       if (need && tool !== 'bulldoze') { this.toast(c, `${need} is needed before you can build that`); return; }
+      if (tool !== 'bulldoze' && this.planning?.reservedAt(x, y)) { this.toast(c, 'A planning application is open on this site: it is kept clear until the vote'); return; }
       if (tool !== 'bulldoze' && this.w.auxAt(x, y)) {
         if (paint) { skipBuilt++; continue; }
         if (isAirfieldAux(this.w.auxAt(x, y))) { this.toast(c, 'That is part of a runway; bulldoze it first'); return; }
@@ -837,7 +855,13 @@ export class Net {
    */
   private publicRoadRefusal(p: Player, tiles: [number, number][]): string | null {
     if (this.cfg.sandbox || !Array.isArray(tiles)) return null;
+    const out = this.publicRoadTiles(tiles);
+    return out.length ? this.sim.publicRoads.removalRefusal(out, p.id) : null;
+  }
+  /** The tiles of a bulldoze drag that would take up public road (a bridge deck brings its whole span; junctions, crossings and paint leave the road). */
+  private publicRoadTiles(tiles: [number, number][]): [number, number][] {
     const out: [number, number][] = [], seen = new Set<number>();
+    if (!Array.isArray(tiles)) return out;
     const add = (x: number, y: number) => { const k = tkey(x, y); if (!seen.has(k)) { seen.add(k); out.push([x, y]); } };
     for (const pair of tiles.slice(0, 256)) {
       const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
@@ -848,7 +872,7 @@ export class Net {
       if (isJunctionAux(a) || isRingClassAux(a) || isDeckClassAux(a) || isRailAux(a) || isAirfieldAux(a)) continue; // these come off and leave the road
       add(x, y);
     }
-    return out.length ? this.sim.publicRoads.removalRefusal(out, p.id) : null;
+    return out;
   }
 
   /** The rules a road drag is planned by (shared/src/roadtool.ts), for this player: their land, their technology. */
@@ -1091,11 +1115,25 @@ export class Net {
     const mask = this.w.refuseAddons.get(key) ?? 0, next = on ? mask | a.bit : mask & ~a.bit;
     if (next === mask) return;
     if (on && a.cost > 0 && p.admin) return this.toast(c, 'In administration: fitting add-ons is stopped until a midnight finds the treasury at zero or above');
+    // planning (M5): a condition of an approved plan stays; a change waiting on a vote blocks another
+    if (!on && this.planning && this.planning.lockedAt(dx, dy) & a.bit) return this.toast(c, `The ${a.label.toLowerCase()} is a condition of the planning approval for this ${g.name}: it cannot be taken off`);
+    if (this.planning?.openAt(dx, dy)) return this.toast(c, 'A planning application for this site is waiting on a vote: change it after the result');
     // taking an add-on off raises what reaches the neighbours: the limits apply again
     if (!this.cfg.sandbox) {
       const owner = q?.owner ?? p.id, at = (tx: number, ty: number) => this.w.parcelAt(tx, ty)?.owner;
       const before = boundaryImpact(b.id, mask, dx, dy, this.w.seed, owner, at), after = boundaryImpact(b.id, next, dx, dy, this.w.seed, owner, at);
       if (after.over.some((k) => after.worst[k] > before.worst[k] + 1e-9)) return this.toast(c, boundaryRefusal(after, g.name, (o) => this.w.players.get(o)?.name ?? o)!);
+      // taking one off that raises what reaches others' land over the planning threshold goes to a vote (M5)
+      const plan = !on && this.planning?.on ? this.planning.needs(b.id, next, dx, dy, owner) : null;
+      if (plan) {
+        const was = planImpact(b.id, mask, dx, dy, this.w.seed, owner, at);
+        if (plan.needs.some((k) => plan.worst[k] > was.worst[k] + 1e-9)) {
+          const why = this.planning!.refileRefusal(p.id, dx, dy, plan.score);
+          if (why) return this.toast(c, why);
+          this.planning!.fileAddon(owner, dx, dy, b.id, mask, next, plan);
+          return;
+        }
+      }
     }
     if (on && a.cost > 0) {
       if (this.w.spendable(p) < a.cost) return this.toast(c, this.w.shortOf(p, a.cost, `for the ${a.label.toLowerCase()}`));
@@ -1103,6 +1141,48 @@ export class Net {
     }
     if (next) this.w.refuseAddons.set(key, next); else this.w.refuseAddons.delete(key);
     this.toast(c, on ? `${a.label} fitted at the ${g.name}${a.cost ? ` for $${a.cost.toLocaleString('en-GB')}` : ''}${a.upkeep ? `, $${a.upkeep} a day upkeep` : ''}: ${a.blurb}` : `${a.label} taken off the ${g.name}`, 'info');
+  }
+
+  /**
+   * File a nuisance build for a residents' vote instead of placing it (M5, sim/planning.ts): the cooling-off and the
+   * changed-design rule, then the building, its conditions and the offer are taken and held until the vote.
+   */
+  private fileBuild(c: Client, placed: Placed, mask: number, imp: ReturnType<Planning['needs']> & object) {
+    const p = c.player!, pl = this.planning!;
+    const why = pl.refileRefusal(p.id, placed.doorX, placed.doorY, imp.score);
+    if (why) return this.toast(c, why);
+    const o = Number(this.filing?.offer);
+    const offer = Number.isFinite(o) && o > 0 ? Math.min(PLANNING.maxOffer, Math.round(o)) : 0;
+    const cost = buildCost(placed.kind, mask);
+    if (this.w.spendable(p) < cost + offer) return this.toast(c, this.w.shortOf(p, cost + offer, offer ? 'for the building, its conditions and your offer' : 'for the building and its conditions'));
+    pl.fileBuild(this.w.parcelAt(placed.doorX, placed.doorY)?.owner ?? p.id, placed, mask, offer, cost, imp);
+  }
+
+  /** Object to a closure notice, withdraw or amend an application (M5). */
+  private planningAct(c: Client, id: number, act: string, conditions: unknown, offer: unknown) {
+    const p = c.player!, pl = this.planning;
+    if (!pl || !Number.isInteger(id)) return;
+    const why = act === 'object' ? pl.object(p.id, id)
+      : act === 'withdraw' ? pl.withdraw(p.id, id)
+        : act === 'amend' ? pl.amend(p.id, id, conditionBits(Array.isArray(conditions) ? conditions : []), offer === undefined ? undefined : Number(offer), this.w.spendable(p))
+          : 'Unknown planning action';
+    if (why) return this.toast(c, why);
+    this.toast(c, act === 'object' ? 'Objection lodged: the road stays' : act === 'withdraw' ? 'Application withdrawn: everything held is refunded' : 'Application amended: the residents will vote on the new plan', 'info');
+  }
+
+  /** Give notice to close protected public road (M5, after a refused bulldoze): its dependents may object within a game day. */
+  private closureNotice(c: Client, tiles: [number, number][]) {
+    const p = c.player!, pl = this.planning;
+    if (!pl || this.cfg.sandbox) return this.toast(c, 'Closure notices are not needed here');
+    const out = this.publicRoadTiles(tiles);
+    if (!out.length) return this.toast(c, 'That is not public road');
+    if (!this.sim.publicRoads.removalRefusal(out, p.id)) return this.toast(c, 'Nobody depends on that road: bulldoze it as it is');
+    for (const a of pl.apps.values()) if (a.status === 'open' && a.kind === 'closure' && a.tiles?.some(([x, y]) => out.some(([tx, ty]) => tx === x && ty === y))) return this.toast(c, 'A closure notice for that road is already running');
+    const cool = pl.closureRefusal(p.id, out);
+    if (cool) return this.toast(c, cool);
+    const dep = this.sim.publicRoads.dependents(out, p.id);
+    if (!dep.length) return this.toast(c, 'Nobody depends on that road: bulldoze it as it is');
+    pl.fileClosure(p.id, out, dep);
   }
 
   /** Rename the street through road tile (x, y) along `ns` (streets.ts): its owner only (anyone's in a sandbox). */
@@ -1131,14 +1211,19 @@ export class Net {
       sub: (tx, ty) => this.w.subAt(tx, ty),
       land: (tx, ty) => {
         const q = this.w.parcelAt(tx, ty);
+        if (this.planning?.reservedAt(tx, ty)) return 'A planning application is open on this site';
         if (q ? this.mayEdit(p, q.owner) : draft && this.cfg.devTools) return null;
         return q ? 'Not your land' : 'Buy this land first';
       },
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
     if (budget < CIVIC_COST[kind]) { this.toast(c, this.w.shortOf(p, CIVIC_COST[kind], `for the ${KIND_NAMES[kind]}`)); return false; }
-    const limit = this.boundaryRefusal(p, kind, verdict.placed.doorX, verdict.placed.doorY, 0); // a refuse site's nuisance at others' boundaries (M4)
+    const mask = this.planning?.on ? conditionBits(Array.isArray(this.filing?.conditions) ? this.filing.conditions : []) & (planningSourceOf(kind)?.conditions ?? 0) : 0; // conditions filed with a plan (M5)
+    const limit = this.boundaryRefusal(p, kind, verdict.placed.doorX, verdict.placed.doorY, mask); // a refuse site's nuisance at others' boundaries (M4)
     if (limit) { this.toast(c, limit); return false; }
+    // within the limits but reaching others' land over the planning threshold: filed for a residents' vote instead (M5)
+    const plan = this.cfg.sandbox ? null : this.planning?.needs(kind, mask, verdict.placed.doorX, verdict.placed.doorY, this.w.parcelAt(verdict.placed.doorX, verdict.placed.doorY)?.owner ?? p.id);
+    if (plan) { this.fileBuild(c, verdict.placed, mask, plan); return false; }
     const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
     if (sea) { this.toast(c, sea); return false; }
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
@@ -1612,6 +1697,9 @@ export class Net {
     if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
     // the news (sim/news.ts): stories new or changed since the last frame
     if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
+    // planning applications (sim/planning.ts, M5): the whole short list whenever it changed, and the mayors' notices
+    if (this.planning?.changed) { this.planning.changed = false; this.broadcast({ t: 'planning', apps: this.planning.dtos(), ...(this.planning.on ? { votes: true } : {}) }); }
+    if (this.planning?.notices.length) for (const n of this.planning.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // road rules (R4: turn bans, no entry, signal crossings): the whole short list whenever one changed; walk phases granted this tick
     if (w.rulesVersion !== this.rulesSent) { this.rulesSent = w.rulesVersion; this.broadcast({ t: 'roadRules', r: w.roadRulesList() }); }
     { const u = this.sim.traffic.drainWalks(); if (u.length) this.broadcast({ t: 'walks', u }); }

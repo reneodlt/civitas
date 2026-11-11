@@ -198,6 +198,17 @@ export class News {
     this.add('line', at.x, at.y, (id) => headline('line', id, { what: what[0].toUpperCase() + what.slice(1), place }), l.mode === 'metro' ? 55 : l.mode === 'bus' ? 30 : 45, { who: l.owner });
   }
 
+  /**
+   * Planning (sim/planning.ts, docs/multiplayer-land.md M5): an application filed, approved or refused, a road closure
+   * given notice, done or stopped. `what` names the plan ("an open tip"); the story is about `who`'s town, and the place
+   * named is `near` (the affected land) when given.
+   */
+  planning(set: 'planFiled' | 'planApproved' | 'planRefused' | 'closureFiled' | 'closureDone' | 'closureBlocked', x: number, y: number, what: string, who: string, kind?: number, near?: [number, number]): StoryDTO {
+    const words: StoryWords = { what, town: this.townName(who, x, y), place: this.placeName(near?.[0] ?? x, near?.[1] ?? y) };
+    const s = set === 'planFiled' || set === 'closureFiled' ? 35 : 45;
+    return dto(this.add('planning', x, y, (id) => headline(set, id, words), s, { who, ...(kind ? { b: kind } : {}) }));
+  }
+
   // ---- the log -----------------------------------------------------------------------------------
 
   private add(k: StoryKind, x: number, y: number, h: (id: number) => string, s: number, extra: Partial<StoryDTO>, ref?: string): Story {
