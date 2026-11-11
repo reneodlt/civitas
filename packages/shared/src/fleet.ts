@@ -12,7 +12,7 @@ import type { Occupation } from './occupations';
  */
 
 /** The vehicle a mobile worker drives (wire bits 19-22). 0: not a fleet vehicle. */
-export const FleetKind = { None: 0, Taxi: 1, PrivateHire: 2, Bicycle: 3, Moped: 4, CourierVan: 5, BinLorry: 6, Sweeper: 7, TradesVan: 8, SchoolBus: 9, UtilityVan: 10, Hearse: 11 } as const;
+export const FleetKind = { None: 0, Taxi: 1, PrivateHire: 2, Bicycle: 3, Moped: 4, CourierVan: 5, BinLorry: 6, Sweeper: 7, TradesVan: 8, SchoolBus: 9, UtilityVan: 10, Hearse: 11, RoadCrew: 12, Gritter: 13 } as const;
 export type FleetKindId = typeof FleetKind[keyof typeof FleetKind];
 
 /** Agent flag bits (protocol.ts packCitizenFlags; net.ts ORs them in): fleet kind in 19-22, loaded in 23, working in 24. */
@@ -35,9 +35,12 @@ export const BIKE_CLASS = 4;
 /** What each fleet vehicle is called, and the job of whoever drives it. */
 export const FLEET_LABEL: Record<number, string> = {
   1: 'taxi', 2: 'private hire car', 3: 'delivery bicycle', 4: 'delivery moped', 5: 'courier van', 6: 'bin lorry', 7: 'street sweeper', 8: 'trades van', 9: 'school bus', 10: 'repair van', 11: 'hearse',
+  // severe weather (docs/weather.md W6): builders out of a yard clearing a fallen tree, or gritting the main roads
+  12: 'road crew truck', 13: 'gritter',
 };
 export const FLEET_JOB: Record<number, string> = {
   1: 'taxi driver', 2: 'private-hire driver', 3: 'delivery rider', 4: 'delivery rider', 5: 'parcel courier', 6: 'refuse collector', 7: 'street sweeper driver', 8: 'tradesperson', 9: 'school bus driver', 10: 'lineworker', 11: 'funeral director',
+  12: 'road crew', 13: 'gritter driver',
 };
 
 /** Who works on the road, and how many (shares are hash-seeded per lot or per citizen). */

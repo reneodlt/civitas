@@ -220,7 +220,7 @@ export class Mobile {
       halt: undefined, dwell: undefined,
     };
     v.halt = -1;
-    v.cls = kind === FleetKind.Bicycle || kind === FleetKind.Moped ? BIKE_CLASS : kind === FleetKind.CourierVan ? VehicleClass.Van : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? VehicleClass.Truck : kind === FleetKind.SchoolBus ? VehicleClass.Bus : VehicleClass.Sedan;
+    v.cls = kind === FleetKind.Bicycle || kind === FleetKind.Moped ? BIKE_CLASS : kind === FleetKind.CourierVan ? VehicleClass.Van : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper || kind === FleetKind.Gritter ? VehicleClass.Truck : kind === FleetKind.RoadCrew ? VehicleClass.Van : kind === FleetKind.SchoolBus ? VehicleClass.Bus : VehicleClass.Sedan;
     if (kind === FleetKind.Bicycle) { v.speedMul *= FOOD.bicycleSpeed; v.gapMul *= 0.7; }
     else if (kind === FleetKind.Moped) { v.speedMul *= FOOD.mopedSpeed; v.gapMul *= 0.8; }
     else if (kind === FleetKind.Sweeper) v.speedMul *= REFUSE.sweeperSpeed;

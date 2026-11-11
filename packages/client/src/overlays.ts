@@ -1,4 +1,4 @@
-import { Overlay, OVERLAY_TEXT, ROAD_CLASS_DEFS, NEIGHBOURHOOD_KIND0, VALUE_KINDS, isNeighbourhoodOverlay } from '@msimcity/shared';
+import { Overlay, OVERLAY_TEXT, OVERLAY_FLOOD, ROAD_CLASS_DEFS, NEIGHBOURHOOD_KIND0, VALUE_KINDS, isNeighbourhoodOverlay } from '@msimcity/shared';
 
 /**
  * The overlays menu (docs/audit-2026-10.md section 4.4) on the top bar's overlay chip and the H key: traffic congestion
@@ -9,7 +9,7 @@ import { Overlay, OVERLAY_TEXT, ROAD_CLASS_DEFS, NEIGHBOURHOOD_KIND0, VALUE_KIND
  * sequential ones, blue against orange for jobs/homes (render/materials.ts).
  */
 export type OverlayMode = 'off' | 'traffic' | 'roads' | 'power' | number;
-const CYCLE: OverlayMode[] = ['traffic', 'roads', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, Overlay.Neighbourhood, 'power', 'off'];
+const CYCLE: OverlayMode[] = ['traffic', 'roads', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, Overlay.Neighbourhood, OVERLAY_FLOOD, 'power', 'off'];
 /** legend gradients matching the shaders (render/materials.ts mscViridis, mscDiverge, HEAT) */
 const VIRIDIS = 'linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725)';
 const DIVERGE = 'linear-gradient(90deg, #e6750d, #eeebdb, #2166cc)';
@@ -104,6 +104,7 @@ export class OverlayMenu {
       VALUE_KINDS.forEach((k, i) => { const ch = NEIGHBOURHOOD_KIND0 + i; html += `<button class="otab${this.mode === ch ? ' sel' : ''}${k.nuisance ? ' bad' : ''}" data-mode="${ch}" title="${k.explain}">${k.key}</button>`; });
       html += '</div>';
     }
+    { const t = OVERLAY_TEXT[OVERLAY_FLOOD]; html += row(OVERLAY_FLOOD, t.lo, t.hi, t.explain); } // docs/weather.md W6
     html += row('power', 'supplied', 'no supply', 'Streets by their substation: supplied, brownout, cut or fault, or a substation with no supply (docs/utilities.md)');
     html += row('off', '', '', 'No overlay');
     this.menu.innerHTML = html;

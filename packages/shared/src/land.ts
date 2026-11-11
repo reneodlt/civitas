@@ -57,9 +57,11 @@ export function landPriceBytes(field: ArrayLike<number> | undefined, out = new U
 
 /**
  * The price of a rectangle in whole dollars: the sum of its tiles' prices (water included, as before M2), at least
- * $1. `bytesOf(cx, cy)` gives a chunk's price bytes, or undefined for a chunk with none (the wild price).
+ * $1. `bytesOf(cx, cy)` gives a chunk's price bytes, or undefined for a chunk with none (the wild price). `mulOf(x, y)`,
+ * when given, scales each tile's price (docs/weather.md W6: flood risk, shared/src/severe.ts floodPriceMul); both sides
+ * pass the same one, so the preview and the charge agree.
  */
-export function landPriceOf(r: { x: number; y: number; w: number; h: number }, bytesOf: (cx: number, cy: number) => ArrayLike<number> | undefined): number {
+export function landPriceOf(r: { x: number; y: number; w: number; h: number }, bytesOf: (cx: number, cy: number) => ArrayLike<number> | undefined, mulOf?: (x: number, y: number) => number): number {
   const wild = priceOfByte(wildPriceByte());
   let sum = 0;
   // walk the rectangle a cell at a time: tiles in the overlap × the cell's price
@@ -68,7 +70,8 @@ export function landPriceOf(r: { x: number; y: number; w: number; h: number }, b
   for (let gy = cy0; gy <= cy1; gy++) for (let gx = cx0; gx <= cx1; gx++) {
     const tx0 = Math.max(r.x, gx * VALUE_CELL), tx1 = Math.min(r.x + r.w, gx * VALUE_CELL + VALUE_CELL);
     const ty0 = Math.max(r.y, gy * VALUE_CELL), ty1 = Math.min(r.y + r.h, gy * VALUE_CELL + VALUE_CELL);
-    const n = (tx1 - tx0) * (ty1 - ty0);
+    let n = (tx1 - tx0) * (ty1 - ty0);
+    if (mulOf) { n = 0; for (let ty = ty0; ty < ty1; ty++) for (let tx = tx0; tx < tx1; tx++) n += mulOf(tx, ty); }
     const kx = Math.floor((gx * VALUE_CELL) / CHUNK_SIZE), ky = Math.floor((gy * VALUE_CELL) / CHUNK_SIZE);
     const b = bytesOf(kx, ky);
     const lx = gx - kx * VALUE_CELLS, ly = gy - ky * VALUE_CELLS;

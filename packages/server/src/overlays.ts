@@ -1,12 +1,13 @@
 import {
   CHUNK_SIZE, Overlay, OVERLAY_COVERAGE_FULL, OVERLAY_JOBS_RADIUS, OVERLAY_JOBS_FULL, Zone, Terrain, KIND_COUNT,
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, LEISURE_CODES, LEISURE_MAX_RADIUS, capacityOf, leisureAt, isRoad, zoneOf, overlayByte,
-  NEIGHBOURHOOD_KIND0, isNeighbourhoodOverlay, VALUE_CELL, VALUE_CELLS, VALUE_SLOTS, VALUE_SLOT_VALUE,
+  NEIGHBOURHOOD_KIND0, isNeighbourhoodOverlay, OVERLAY_FLOOD, VALUE_CELL, VALUE_CELLS, VALUE_SLOTS, VALUE_SLOT_VALUE,
 } from '@msimcity/shared';
 import type { World } from './world';
 import type { Simulation } from './sim/simulation';
 import type { Issues } from './sim/issues';
 import type { News } from './sim/news';
+import type { Severe } from './sim/severe';
 import { LEISURE } from './sim/life';
 
 const N = CHUNK_SIZE * CHUNK_SIZE;
@@ -24,6 +25,8 @@ export class Overlays {
   private reach = new Uint8Array(N);
   /** the news log (sim/news.ts), for the news overlay; set by Net */
   news: News | null = null;
+  /** severe weather (sim/severe.ts), for the Flood risk layer; set by Net */
+  severe: Severe | null = null;
 
   constructor(private w: World, private sim: Simulation, private issues: Issues) {}
 
@@ -37,6 +40,7 @@ export class Overlays {
       case Overlay.Happiness: return this.happiness(cx, cy, ch0.tiles, ch0.aux);
       case Overlay.JobsHomes: return this.jobsHomes(cx, cy, ch0.tiles);
       case Overlay.News: return this.newsReach(cx, cy, ch0.tiles);
+      case OVERLAY_FLOOD: return this.severe ? this.severe.overlayBytes(cx, cy, ch0.tiles) : new Uint8Array(N);
       default: return isNeighbourhoodOverlay(ch) ? this.neighbourhood(ch, cx, cy, ch0.tiles) : null;
     }
   }

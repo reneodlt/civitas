@@ -73,6 +73,15 @@ export const OVERLAY_TEXT: Record<number, OverlayText> = {
 };
 VALUE_KINDS.forEach((k, i) => { OVERLAY_TEXT[NEIGHBOURHOOD_KIND0 + i] = { name: k.name, lo: k.lo, hi: k.hi, ramp: 0, explain: k.explain }; });
 
+/**
+ * The Flood risk layer (docs/weather.md W6, server sim/severe.ts): a channel of its own past the Neighbourhood kinds, so
+ * new value kinds do not move it. Each tile's flood risk (shared/src/severe.ts), lower behind flood defences, the top
+ * where the water is now.
+ */
+export const OVERLAY_FLOOD = 31;
+OVERLAY_TEXT[OVERLAY_FLOOD] = { name: 'flood risk', lo: 'dry ground', hi: 'floods first', ramp: 0, explain: 'Low land by rivers and lakes that floods after days of heavy rain (docs/weather.md); paler behind flood defences, brightest where the water is now' };
+/** A channel the server answers: the base layers, the Neighbourhood kinds and the Flood risk layer. */
+export const isOverlayChannel = (ch: number) => Number.isInteger(ch) && ((ch > 0 && ch < OVERLAY_COUNT) || ch === OVERLAY_FLOOD);
 /** Overlay bytes: 0 is no data (water, roads, a happiness tile with nobody home); 1-255 carry the value. */
 export const overlayByte = (v01: number) => 1 + Math.round(Math.max(0, Math.min(1, v01)) * 254);
 export const overlayValue = (b: number) => (b - 1) / 254;

@@ -1,6 +1,6 @@
 import { CanvasTexture, WebGLRenderTarget, PerspectiveCamera, LinearFilter, SRGBColorSpace, Vector3, type Texture, type WebGLRenderer, type Scene, type Object3D } from 'three';
 import {
-  CIVITAS_CHANNELS, dayForecast, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, leisureAt, eventOn, eventStartAt, isLeisure,
+  CIVITAS_CHANNELS, dayForecast, severeOutlook, warningText, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, leisureAt, eventOn, eventStartAt, isLeisure,
   isRoad, zoneOf, levelOf, CHUNK_SIZE, RANKS, TRANSIT, TAXI, FOOD, CITIES, WEEKDAY_NAMES, TICKS_PER_DAY, TICKS_PER_HOUR, Zone,
   type TvChannel, type Programme, type Genre, type HeliState, type StoryDTO, type CitizenInfo, type RankDTO, type ServerMsg, type LeisureSpec,
 } from '@msimcity/shared';
@@ -414,6 +414,12 @@ export class TvGuide implements TvSource {
     g.textAlign = 'right'; g.fillText(`${fc.lo}° to ${fc.hi}°`, GFX_W - 10, 21); g.textAlign = 'left';
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, GFX_H - 22, GFX_W, 22);
     g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif'; g.fillText(`${ch.name} weather · wind ${fc.windFrom} ${fc.wind} mph`, 10, GFX_H - 7);
+    // a storm or flood warning (docs/weather.md W6): a red band under the title, the same outlook the server warns from
+    const warn = severeOutlook(this.worldSeed, tick)[0];
+    if (warn) {
+      g.fillStyle = '#c0281e'; g.fillRect(0, 32, GFX_W, 20);
+      g.fillStyle = '#fff'; g.font = 'bold 11px system-ui, sans-serif'; g.fillText(warningText(warn, Math.floor(tick / TICKS_PER_HOUR)).toUpperCase(), 8, 46);
+    }
   }
 
   // ---- teletext ------------------------------------------------------------------------------------------
@@ -465,6 +471,8 @@ export class TvGuide implements TvSource {
     out.push({ no: 140, title: 'WEATHER', band: '#008000', lines: [
       ['TODAY', '#ff0'], [`${fc.sky}.`, '#fff'], [`Highs of ${fc.hi}C, lows of ${fc.lo}C.`, '#fff'], [`Wind ${fc.windFrom}, ${fc.wind} mph.`, '#fff'], ['', '#fff'],
       ['TOMORROW', '#ff0'], [`${tm.sky}. ${tm.lo}C to ${tm.hi}C.`, '#0ff'],
+      // storm and flood warnings a game day ahead (docs/weather.md W6)
+      ...severeOutlook(this.worldSeed, tick).flatMap((e): [string, string][] => [['', '#fff'], ...lines(warningText(e, Math.floor(tick / TICKS_PER_HOUR)), 37).map((l): [string, string] => [l, '#f44'])]),
     ] });
     // 430 travel: real jams from the traffic bytes the client holds
     out.push({ no: 430, title: 'TRAVEL', band: '#c80000', lines: this.travel() });

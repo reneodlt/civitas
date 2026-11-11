@@ -18,7 +18,7 @@
  */
 import {
   LAND_TUNING as L, ECONOMY_TUNING, Terrain, Zone, TICKS_PER_DAY, TICKS_PER_HOUR, START_MONEY, FRONTIER_MONEY, packTile, isBuildable,
-  isRoad, landPriceOf, b64ToU8, chunkKey, tilePriceOfValue, priceOfByte, priceByte, wildPriceByte, type ServerMsg, type ClientMsg,
+  isRoad, landPriceOf, floodPriceMul, floodRiskAt, b64ToU8, chunkKey, tilePriceOfValue, priceOfByte, priceByte, wildPriceByte, type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
 import { World, tkey } from './world';
 import { seedCommons, seedFrontier } from './seed';
@@ -98,7 +98,7 @@ ok(best > 2.5 * wild8, `land in the town is dearer: the best 8×8 at (${bestAt})
 const subs: [number, number][] = [];
 for (let cy = -3; cy <= 2; cy++) for (let cx = -3; cx <= 2; cx++) subs.push([cx, cy]);
 ada.send({ t: 'sub', chunks: subs });
-const clientPrice = (r: { x: number; y: number; w: number; h: number }) => landPriceOf(r, (cx, cy) => ada.prices.get(chunkKey(cx, cy)));
+const clientPrice = (r: { x: number; y: number; w: number; h: number }) => landPriceOf(r, (cx, cy) => ada.prices.get(chunkKey(cx, cy)), (x, y) => floodPriceMul(floodRiskAt(world.seed, x, y)));
 let same = 0, tried = 0, sentChunks = ada.prices.size;
 for (let y = -60; y <= 40; y += 7) for (let x = -60; x <= 40; x += 9) { const r = { x, y, w: 1 + (x & 15) + 8, h: 1 + (y & 7) + 9 }; tried++; if (clientPrice(r) === land.priceOf(r)) same++; }
 ok(same === tried && sentChunks > 0, `client and server agree on ${same} of ${tried} rectangles (${sentChunks} chunks of price bytes sent; the rest are the wild price)`);
@@ -129,7 +129,9 @@ ok(/cut off Bob's parcel/.test(ringMsg) && parcelsOf('ada').length === 6, 'the s
 const home = parcelsOf('ada').find((q) => q.name === "Ada's homestead")!;
 const expect = land.taxOf(home);
 const allTax = parcelsOf('ada').reduce((a, q) => a + land.taxOf(q), 0);
-ok(Math.abs(expect - 256 * land.tilePrice(home.x, home.y) * L.emptyTax) < 0.5, `an empty homestead pays ${usd(expect)} a day (${Math.round(L.emptyTax * 100)}% of its price)`);
+// each tile at its own price: flood risk lowers some (docs/weather.md W6)
+const priceSum = (q: { x: number; y: number; w: number; h: number }, skip = (_x: number, _y: number) => false) => { let p = 0; for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) if (!skip(x, y)) p += land.tilePrice(x, y); return p; };
+ok(Math.abs(expect - priceSum(home) * L.emptyTax) < 0.5, `an empty homestead pays ${usd(expect)} a day (${Math.round(L.emptyTax * 100)}% of its price)`);
 midnight();
 const paid = -(ledger('ada').landtax ?? 0);
 ok(Math.abs(paid - Math.round(allTax * 100) / 100) < 0.6, `at midnight Ada paid ${usd(paid)} on the ledger's "Empty-land tax" line (expected about ${usd(allTax)})`);
@@ -137,7 +139,7 @@ ok(Math.abs(paid - Math.round(allTax * 100) / 100) < 0.6, `at midnight Ada paid 
 for (let x = home.x; x < home.x + 16; x++) world.setTile(x, home.y + 4, packTile(Terrain.Grass, true, 0, 0));
 for (let y = home.y; y < home.y + 4; y++) for (let x = home.x; x < home.x + 16; x++) world.setTile(x, y, packTile(Terrain.Grass, false, Zone.Residential, 0));
 const after = land.taxOf(home);
-ok(Math.abs(after - expect * (256 - 80) / 256) < 0.05, `with a road and a zoned row on it the homestead pays ${usd(after)}: built-on tiles pay nothing`);
+ok(Math.abs(after - priceSum(home, (_x, y) => y <= home.y + 4) * L.emptyTax) < 0.05, `with a road and a zoned row on it the homestead pays ${usd(after)}: built-on tiles pay nothing`);
 // away: paused
 ada.leave();
 const seen = ada.p().seen!;

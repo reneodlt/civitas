@@ -3,7 +3,7 @@ import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, INTERCHANGE_COST, TURN_RULE_COST, PELICAN_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
-import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
+import { MANIFEST, SEVERE, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
 import { FLEET_LABEL, classDef, namesClass } from '@msimcity/shared';
 import { WEEKDAY_NAMES, type RefuseSiteInfo } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
@@ -18,7 +18,7 @@ import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } fr
 import type { RoadClassPicker } from './roadpicker';
 import type { StreetRulePicker } from './streetrules';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
-const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️' };
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️', 'road crew truck': '🚐', gritter: '🚛' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -67,6 +67,11 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
   const i = TOOLS.findIndex((t) => t.id === 'powerdepot');
   if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'pylons', label: 'Pylons (drag)', key: '', cost: `$${UTIL.overheadCost}/tile`, color: '#9aa1aa', group: TOOLS[i].group },
     { id: 'cable', label: 'Buried cable (drag)', key: '', cost: `$${UTIL.buriedCost}/tile`, color: '#b5463a', group: TOOLS[i].group });
+}
+// flood defences (docs/weather.md W6) are dragged along a bank like track: right after the builders' yard; no key left
+{
+  const i = TOOLS.findIndex((t) => t.id === 'yard');
+  if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'floodwall', label: 'Flood wall (drag along a bank)', key: '', cost: `$${SEVERE.wallCost}/tile`, color: '#9a9a94', group: TOOLS[i].group });
 }
 /** tool id -> kind code, for the swatch colour of a building's tooltip (every catalogue kind with a tool) */
 /** tool id -> kind id (BuildingInfo.kind and SiteDTO.kind are kind ids, docs/sub-kinds.md) */

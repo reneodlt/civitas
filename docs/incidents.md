@@ -270,3 +270,22 @@ other fire in the grace day. A 2×2 Commons over two days has a few fires, and t
   - 2.094 ms against 2.068 ms, the median of each side's medians, which is **-1.2%**. The pairs were -2.0, -9.7, +4.8, -2.4, -2.1 and +3.5%: noise.
   - `Fires.tick` itself took 0.0143 ms against 0.0113 ms.
   - The branch lit 8 fires in the measured day (5 of them spread), and main lit 3.
+
+## Severe weather (docs/weather.md W6)
+
+Storms and floods are incidents by place, not by player, and come with a warning a game day ahead (a toast to the mayors
+with land in the way, a news story, the TV and teletext, a ⚠ on the weather chip). Code: `server/src/sim/severe.ts`,
+`shared/src/severe.ts`; check `npm run severe:check`.
+
+- **Fallen trees.** In a storm, road tiles beside parks and wild trees may have a tree come down across them (hashed by
+  tile, hour and seed; at most 12 at once). The tile is closed: `Traffic.closures`, priced out of every route
+  (`CLOSED_COST`), drawn as a trunk with barriers. A road crew (a builder on shift at the nearest builders' yard, in a
+  hi-vis van) clears it 45 game minutes after it gets there; a contractor after 8 game hours if none comes.
+- **Floods.** After days of heavy rain the river level rises; low land by the water (the Flood risk overlay) floods for
+  hours from the water's edge: roads close, a flooded home's people stay in, flooded shops and works shut. Each flooded
+  building's owner pays 8% of its book value once a flood ("Flood damage"); a flood never takes a level or demolishes,
+  and an owner away 3 days or more pays nothing. Flood walls (the Flood wall tool) hold the water back behind a
+  continuous line until the river is 85% up.
+- **Line faults.** Overhead lines fault three times as often in a storm (W4, `docs/utilities.md` 4.4); the repair vans
+  work as before.
+- **Insurance**: a hook only (`floodInsured`, false for everyone).

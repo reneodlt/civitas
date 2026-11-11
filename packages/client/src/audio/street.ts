@@ -37,8 +37,8 @@ export function passKindOf(a: StreetAgent): PassKind {
     case FleetKind.Bicycle: return 'bike';
     case FleetKind.Moped: return 'moped';
     case FleetKind.Taxi: case FleetKind.PrivateHire: return 'taxi';
-    case FleetKind.CourierVan: case FleetKind.TradesVan: case FleetKind.UtilityVan: return 'van';
-    case FleetKind.BinLorry: case FleetKind.Sweeper: return 'lorry';
+    case FleetKind.CourierVan: case FleetKind.TradesVan: case FleetKind.UtilityVan: case FleetKind.RoadCrew: return 'van';
+    case FleetKind.BinLorry: case FleetKind.Sweeper: case FleetKind.Gritter: return 'lorry';
     case FleetKind.SchoolBus: return 'bus';
     case FleetKind.Hearse: return 'car';
   }

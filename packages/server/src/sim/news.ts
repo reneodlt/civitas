@@ -231,6 +231,16 @@ export class News {
     this.touch(st);
   }
 
+  /**
+   * Severe weather (sim/severe.ts, docs/weather.md W6): a storm or flood warning a game day ahead, a flood closing roads,
+   * fallen trees. `headline` may hold `{place}`, filled with the place's name at (x, y); `ref` keeps one story per spell.
+   */
+  severe(e: { headline: string; x: number; y: number; s: number; owner?: string; ref?: string }) {
+    const h = e.headline.replace('{place}', this.placeName(e.x, e.y));
+    if (e.ref) { const st = this.byRef.get(e.ref); if (st && (st.end === undefined || st.end > this.w.tick)) { st.h = h; this.touch(st); return; } }
+    this.add('weather', e.x, e.y, () => h, e.s, e.owner ? { who: e.owner } : {}, e.ref);
+  }
+
   // ---- the log -----------------------------------------------------------------------------------
 
   private add(k: StoryKind, x: number, y: number, h: (id: number) => string, s: number, extra: Partial<StoryDTO>, ref?: string): Story {

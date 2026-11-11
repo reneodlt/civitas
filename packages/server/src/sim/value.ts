@@ -2,7 +2,7 @@ import {
   CHUNK_SIZE, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, CitizenState, VehicleClass, KIND_COUNT, SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF,
   VALUE, ValueKind, VALUE_KINDS, VALUE_KIND_COUNT, VALUE_SLOTS, VALUE_SLOT_VALUE, VALUE_CELL, VALUE_CELLS, VALUE_CELLS_PER_CHUNK,
   AVERAGE_VALUE_WEIGHTS, valueKernels, combineValue, nuisanceShare, valueByte, valueHighlights, industryAttrs, isLandmarkKind,
-  isWasteDepot, isPowerPlant, refuseGradeOf, refuseEmission, UTIL_POLLUTION_OF, leisureAt, capacityOf, tileKey, isRoad, zoneOf, type Airport, type ValueKernel,
+  isWasteDepot, isPowerPlant, floodRiskChunk, SEVERE, refuseGradeOf, refuseEmission, UTIL_POLLUTION_OF, leisureAt, capacityOf, tileKey, isRoad, zoneOf, type Airport, type ValueKernel,
 } from '@msimcity/shared';
 import type { Building, Mover, World } from '../world';
 import { tkey, untkey } from '../world';
@@ -380,6 +380,8 @@ export class ValueField {
       if (s.x + r >= x0 && s.x - r < x0 + CHUNK_SIZE && s.y + r >= y0 && s.y - r < y0 + CHUNK_SIZE) near.push(s);
     }
     const best = this.best, E = VALUE.emit;
+    // flood risk is a hazard (docs/weather.md W6): the cell's mean risk of its 16 tiles (shared/src/severe.ts), at least
+    const risk = floodRiskChunk(this.seed, tx, ty);
     for (let i = 0; i < CPC; i++) {
       const cx = x0 + (i % CS) * VALUE_CELL + VALUE_CELL / 2, cy = y0 + Math.floor(i / CS) * VALUE_CELL + VALUE_CELL / 2;
       best.fill(0);
@@ -391,6 +393,11 @@ export class ValueField {
       for (let z = 0; z < KIND_COUNT; z++) cover += best[z];
       const o = i * VALUE_SLOTS, s = i * K;
       for (let k = 0; k < K; k++) out[o + k] = Math.round(255 * (1 - Math.exp(-sums[s + k])));
+      let rs = 0;
+      const rx = (i % CS) * VALUE_CELL, ry = Math.floor(i / CS) * VALUE_CELL;
+      for (let yy = 0; yy < VALUE_CELL; yy++) for (let xx = 0; xx < VALUE_CELL; xx++) { const b = risk[(ry + yy) * CHUNK_SIZE + rx + xx]; if (b) rs += (b - 1) / 254; }
+      const flood = Math.round((255 * SEVERE.hazard * rs) / (VALUE_CELL * VALUE_CELL));
+      if (flood > out[o + ValueKind.Hazard]) out[o + ValueKind.Hazard] = flood;
       out[o + ValueKind.Disorder] = Math.round(out[o + ValueKind.Disorder] * (1 - E.policeCut * Math.min(1, best[Zone.Police])));
       out[o + ValueKind.Services] = Math.round(255 * Math.min(1, cover / VALUE.servicesFull));
       out[o + ValueKind.Quiet] = 255 - Math.max(out[o + ValueKind.Noise], out[o + ValueKind.Traffic]);

@@ -85,7 +85,9 @@ export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builder
   /** M5 (docs/multiplayer-land.md section 6): community offers made on planning applications, held and paid out to the affected owners */
   | 'planning'
   /** M8 (docs/multiplayer-land.md section 7 "Services"): service contracts, paid hourly: what a provider is paid, and what a buyer pays */
-  | 'contracts' | 'services';
+  | 'contracts' | 'services'
+  /** W6 (docs/weather.md): a flood's damage to a building, billed once a flood */
+  | 'flood';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
@@ -94,6 +96,7 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
   landsale: 'Land sales', rent: 'Land rent',
   planning: 'Planning offers',
   contracts: 'Service contracts sold', services: 'Services bought from neighbours',
+  flood: 'Flood damage',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -118,6 +121,7 @@ export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff', landsale: 'oneoff',
   planning: 'oneoff',
   contracts: 'running', services: 'running',
+  flood: 'oneoff',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
 export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
@@ -731,7 +735,9 @@ export type ClientMsg =
   | { t: 'adFlyPost'; campaign: number; slot: [number, number, number] }
   /** utilities (docs/utilities.md, server sim/utilities.ts): take down the trunk link through (x, y); pin a node as protected, or switch your grid import */
   | { t: 'utilLink'; op: 'remove'; x: number; y: number }
-  | { t: 'utilNode'; x: number; y: number; protect?: boolean; importOn?: boolean };
+  | { t: 'utilNode'; x: number; y: number; protect?: boolean; importOn?: boolean }
+  /** severe weather (docs/weather.md W6, server sim/severe.ts): build flood defences along these tiles (a drag), or take down the one at tiles[0] */
+  | { t: 'floodWall'; tiles: [number, number][]; remove?: boolean };
 
 export type ServerMsg =
   /** a server with sign-in did not let this hello in (docs/accounts.md): `signIn` = no token, or one that expired or did not check
@@ -834,6 +840,11 @@ export type ServerMsg =
   | { t: 'deceased'; id: number; info: DeceasedInfo | null }
   /** utilities (shared/src/utilities.ts): every node's state once a game hour and on a fault or repair, flat [x, y, UtilState, load %, ...] (doors); `h` the game hour */
   | { t: 'utilState'; h: number; n: number[]; /** each power plant's output as a whole percent of its full rating, flat [x, y, percent, ...]: the wind turbine's rotor turns while it is above 0 (docs/utilities.md 4.5) */ p?: number[] }
+  /**
+   * severe weather (docs/weather.md W6, server sim/severe.ts), on hello and when it changes: fallen trees closing roads and
+   * the tiles under floodwater now (flat x, y), flood defences (flat x, y), the river level (0..1)
+   */
+  | { t: 'severe'; trees: number[]; flood: number[]; walls: number[]; level: number }
   /** every trunk link (shared/src/utilities.ts UtilLinkDTO), on hello and whenever one is laid, taken down or faults */
   | { t: 'utilLinks'; links: UtilLinkDTO[]; /** link ids faulted now */ down?: number[] };
 

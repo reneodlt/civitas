@@ -8,11 +8,11 @@ import { pinchFactor, readScrollMode, writeScrollMode, scrollZoom, wheelPixels, 
 /** how far a press may travel before it is a drag (a pan) rather than a click */
 const CLICK_SLOP = 5;
 /** tools that drag a path or a line over the ground: they pick the ground tile, never a building's column (pick.ts) */
-const GROUND_TOOLS = new Set<string>(['road', 'rail', 'pylons', 'cable', 'runway', 'streetrule']);
+const GROUND_TOOLS = new Set<string>(['road', 'rail', 'pylons', 'cable', 'runway', 'streetrule', 'floodwall']);
 /** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
 interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
-export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | KindToolId;
+export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | 'floodwall' | KindToolId;
 /** `?dev` in the URL shows draft kinds (catalogue `draft: true`) in the tool bar and on their keys. */
 export const DEV_TOOLS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('dev');
 /** Kinds whose tool shows: every catalogue kind with a tool, drafts only with ?dev. */
@@ -267,7 +267,7 @@ export class Input {
     if (this.tool === 'buy') { this.buyStart = tile; this.buyRect = { x: tile[0], y: tile[1], w: 1, h: 1 }; return; }
     if (this.tool === 'runway') { this.runwayStart = tile; this.runwayLine = [tile]; return; }
     // track and trunk links (docs/utilities.md 4.2) drag the same way: along the longer axis, then one corner
-    if (this.tool === 'rail' || this.tool === 'pylons' || this.tool === 'cable') { this.railStart = tile; this.railPath = [tile]; return; }
+    if (this.tool === 'rail' || this.tool === 'pylons' || this.tool === 'cable' || this.tool === 'floodwall') { this.railStart = tile; this.railPath = [tile]; return; }
     if (this.tool === 'road') { this.roadStart = tile; this.roadEnd = tile; this.roadFirstX = undefined; this.roadShape = 'line'; this.roadPath = [tile]; return; }
     if (this.tool === 'streetrule') { this.streetStart = tile; this.streetPath = [tile]; this.streetNs = this.nsAt(e.offsetX, e.offsetY, tile); return; } // Shift at the press pans, as with any tool; held during the drag it makes a loop
     this.painting = true; this.painted.clear(); this.lastPaint = null;
@@ -336,7 +336,7 @@ export class Input {
     this.rightDown = null;
     if (this.buyStart && this.buyRect) this.cb.onBuy(this.buyRect);
     if (this.runwayStart && this.runwayLine) this.cb.onBuild('runway', this.runwayLine);
-    if (this.railStart && this.railPath) this.cb.onBuild(this.tool === 'pylons' || this.tool === 'cable' ? this.tool : 'rail', this.railPath);
+    if (this.railStart && this.railPath) this.cb.onBuild(this.tool === 'pylons' || this.tool === 'cable' || this.tool === 'floodwall' ? this.tool : 'rail', this.railPath);
     this.railStart = null; this.railPath = null;
     if (this.streetStart && this.streetPath && e.type === 'pointerup') {
       const p = this.streetPath, ns = p.length > 1 ? p[0][0] === p[1][0] : this.streetNs;

@@ -228,6 +228,12 @@ export class Simulation {
   start: FirstFive;
   /** utilities (sim/utilities.ts, docs/utilities.md): whether building b may grow to `target` (level 2 and up need power); set by game.ts */
   powerGate: ((b: Building, target: number) => boolean) | null = null;
+  /**
+   * Severe weather (sim/severe.ts, docs/weather.md W6; set by game.ts): a citizen who stays home instead of setting out for
+   * a shift (their home or workplace flooded), and a place shut to visitors (a flooded venue). Null: nobody, nothing.
+   */
+  stayHome: ((c: Citizen) => boolean) | null = null;
+  closedAt: ((x: number, y: number) => boolean) | null = null;
   /** what citizens care about and the choices they score with it (sim/motivation.ts, docs/motivation.md M1-M2) */
   motive: Motivation;
   private motiveHost: MotiveHost;
@@ -1482,7 +1488,7 @@ export class Simulation {
           break;
         case S.Work:
           if (tick >= c.nextAt) this.endShift(c);
-          else if (familyOf(c.kind) === Zone.Yard && (tick + c.id) % SITE_SEARCH_EVERY === 0) this.seekSite(c);
+          else if (familyOf(c.kind) === Zone.Yard && (tick + c.id) % SITE_SEARCH_EVERY === 0 && !this.mobile.unitOf(c.id)) this.seekSite(c); // not while out on a road crew or gritting (docs/weather.md W6)
           break;
         case S.ToSite:
           if (tick >= c.nextAt) this.endShift(c);
@@ -1507,6 +1513,7 @@ export class Simulation {
 
   private depart(c: Citizen) {
     if (this.death.staysHome(c)) { this.scheduleNext(c); return; } // a funeral in the family, or grief (sim/death.ts)
+    if (this.stayHome?.(c)) { this.scheduleNext(c); return; } // floodwater at home or at work (sim/severe.ts, W6)
     if (this.staysOffSick(c)) {
       c.sickDays++; c.offSickDay = this.today; this.lifeEvents.sickDaysOff++;
       this.scheduleNext(c); // skip this shift; the next one is at least REST_TICKS away
@@ -1572,7 +1579,7 @@ export class Simulation {
     // a day or night out (not the café stop before work) may go to a park, cinema, theatre, sports hall or library instead
     if (then === S.ToHome) {
       const lb = this.pickLeisure(c, false);
-      if (lb && this.tripToVenue(c, lb.x, lb.y, then)) return true;
+      if (lb && !this.closedAt?.(lb.x, lb.y) && this.tripToVenue(c, lb.x, lb.y, then)) return true;
     }
     const fx = Math.floor(c.x), fy = Math.floor(c.y);
     const r = findPath(w, fx, fy, (x, y) => {
@@ -1580,6 +1587,7 @@ export class Simulation {
       const b = w.buildings.get(key);
       if (!b || b.zone !== Zone.Commercial || b.level === 0) return false;
       if ((this.visitors.get(key) ?? 0) >= venueCapacityOf(b.id, b.level)) return false;
+      if (this.closedAt?.(x, y)) return false; // shut by floodwater (W6)
       return Math.random() < 0.6; // don't all pile into the nearest place
     }, 900);
     if (!r) return false;

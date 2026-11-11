@@ -16,3 +16,13 @@ export function makeTerrainSampler(seed: number) {
     return Terrain.Grass;
   };
 }
+
+/**
+ * The ground's height before it is classed (docs/weather.md W6, flood risk): the same noise as makeTerrainSampler, so
+ * water is where it is under WATER_LEVEL. The world is drawn flat; this height is read for floods only.
+ */
+export const WATER_LEVEL = -0.22;
+export function makeElevationSampler(seed: number) {
+  const noise = new SimplexNoise(seed);
+  return (x: number, y: number): number => noise.fbm(x * 0.018, y * 0.018, 4) + 0.45 * Math.exp(-(x * x + y * y) / (60 * 60));
+}
