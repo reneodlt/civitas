@@ -26,7 +26,8 @@
     "perf:check": "tsx packages/server/src/loadtest/perf-check.ts",
     "crossing:check": "tsx packages/server/src/crossing-check.ts",
     "auth:check": "tsx packages/server/src/auth-check.ts",
-    "weather:check": "tsx packages/server/src/weather-check.ts"
+    "weather:check": "tsx packages/server/src/weather-check.ts",
+    "roadrules:check": "tsx packages/server/src/roadrules-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

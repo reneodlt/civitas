@@ -63,6 +63,26 @@ export interface Parcel {
   /** a colour its owner gave it on the map; absent: the owner's */
   color?: number;
 }
+/**
+ * A road tile on unclaimed land (docs/multiplayer-land.md section 8, M3; sim/publicroads.ts keeps them): who pays for it,
+ * when it was last used and by whom. Kept for every public road tile; saved (snapshot `publicRoads`).
+ */
+export interface PublicRoad {
+  /** who laid it (or last upgraded it) and pays its upkeep; absent for road from before M3 and once adopted */
+  b?: string;
+  /** laid before M3 (or by the world itself): nobody pays, it never fades */
+  old?: 1;
+  /** adopted (other players' traffic used it on adoptDays of the last adoptWindow days): nobody pays for now (M4: the regional fund) */
+  ad?: 1;
+  /** the last game day it carried traffic or had something built beside it */
+  used: number;
+  /** days other owners' traffic (not the builder's) was seen on it: bit i is day `od` - i */
+  om: number; od: number;
+  /** the owners whose citizens or vehicles were seen on it, to the last day seen (pruned to the adoption window) */
+  u?: Record<string, number>;
+  /** the day its builder was told it fades the next midnight */
+  warned?: number;
+}
 export type Progress = Record<Counter, number>;
 export const emptyProgress = (): Progress => ({ built: 0, roads: 0, housed: 0, jobs: 0, parked: 0, pupils: 0, graduates: 0 });
 /** Treasury a dev player with unlimited funds is held at. */
@@ -327,6 +347,11 @@ export class World {
   /** doors ("x,y") of services and builders' yards their owners mothballed (sim/finance.ts): no staff, no upkeep, no
    *  coverage; saved in the snapshot. A building that goes or changes kind leaves the set (syncBuilding). */
   mothballed = new Set<string>();
+  /**
+   * Road tiles on unclaimed land by tkey (sim/publicroads.ts, docs/multiplayer-land.md M3): builder, use, adoption.
+   * Saved (snapshot `publicRoads`); a tile taken into a parcel leaves it (setParcelId).
+   */
+  publicRoads = new Map<number, PublicRoad>();
   /** a player's overdraft and administration for the players message (sim/finance.ts sets it) */
   financeDTO: ((p: Player) => FinanceDTO | undefined) | null = null;
 
@@ -912,6 +937,7 @@ export class World {
     return c ? c.parcel[localIndex(x, y)] : 0;
   }
   setParcelId(x: number, y: number, id: number) {
+    if (id && this.publicRoads.size) this.publicRoads.delete(tkey(x, y)); // bought: the road is the parcel's now, its builder record goes
     const c = this.getChunk(chunkOf(x), chunkOf(y))!;
     c.parcel[localIndex(x, y)] = id;
     c.modified = true;

@@ -331,3 +331,92 @@ demand; test with two or three player bots before tuning numbers.
 
 Still open, for the phases that need them: the empty-land tax rate, the boundary limit per kind, the plan-size scale of
 the spending cap, the adoption threshold for shared roads, and the abandoned-land periods. All are tuning, set in M2-M5.
+
+## Built: M3 roads (2026-11-11)
+
+Section 8's first, second, third and sixth bullets, for road on unclaimed land ("public road"). Code:
+`server/src/sim/publicroads.ts` (one `PublicRoads` per game, owned by the Simulation), `World.publicRoads`, the road and
+bulldoze intents in `server/src/net.ts`, the tunables in `shared/src/tuning.ts` (`PUBLIC_ROAD_TUNING`). Check:
+`npm run roadrules:check` (`server/src/roadrules-check.ts`, a frontier world driven over fake clients).
+
+**The record.** `World.publicRoads` maps each public road tile (tkey) to `{ b?, old?, ad?, used, om, od, u?, warned? }`:
+the builder, whether it is from before M3, whether it was adopted, the last day it was used, the days other owners'
+traffic was seen (a bitmask), and the owners seen on it lately. Saved as the optional snapshot field `publicRoads` (no
+format bump). When the game starts, every road tile on unclaimed land without a record becomes `old`: a save from before
+M3, and the seeded country road of a frontier, load with their public roads nobody's. A tile taken into a parcel leaves
+the map (`World.setParcelId`), and midnight drops records whose tile is no longer road.
+
+**Builder pays.** The road tool records the player as builder of every tile it lays on unclaimed land, bridge decks
+included, and of every public tile it upgrades to another class (the upgrader becomes the builder, an adopted or old
+tile included). At midnight each builder pays the day's upkeep of their tiles at the class's rate (`classDef(...).upkeep`,
+the same as `recountRoads` charges a parcel), as one ledger line, `roads`, "Public roads" (a running cost). Old and
+adopted tiles cost nobody.
+
+**Use.** Every `sampleTicks` (20) ticks the sampler looks at each moving citizen and each vehicle on the road: one standing
+on a public road tile marks it used today, under its owner (a citizen's home parcel's owner, a vehicle's `owner`); a
+public tile with any congestion is used too, and at midnight so is one with anything built, being built or zoned beside
+it. Walkers count (citizens on foot have a leg like drivers).
+
+**Fading.** A non-old tile unused for `fadeDays` (5) whole days goes back to plain ground at midnight (`setTile`, ordinary
+tile deltas; its class byte goes with it; no refund). The builder is told the midnight before (a toast through the
+simulation's notices) and when it goes. Fading tiles are taken a 4-connected cluster at a time, and a cluster whose
+removal would cut anyone's land (the builder's included) off from every gateway stays; it is looked at again after
+another `fadeDays`. Junction, bridge-deck and level-crossing tiles never fade (their builder can bulldoze them).
+
+**Adoption.** A non-old tile on which other owners' traffic (anyone but the builder) was sampled on `adoptDays` (3) of the
+last `adoptWindow` (5) days is adopted at midnight: the builder record is cleared, the builder is told, and nobody pays
+its upkeep. The day's adopted upkeep is handed to `PublicRoads.regionalFund`, a hook that is null for now: M4's
+regional fund (section 5, the levy) fills it. An adopted tile is protected like any other (below) and still fades if
+all traffic leaves it.
+
+**Protected removal.** Before a bulldoze, `net.ts publicRoadRefusal` gathers the tiles of the drag that would take up
+public road (a bridge deck brings its whole span; junction and crossing tiles, which only lose their junction, are left
+out) and asks `PublicRoads.removalRefusal`, all tiles together. It refuses, as an error toast naming who depends on it:
+
+- **Cut off.** Any other player's land that reaches a gateway along roads now and would not without the tiles. A bounded
+  breadth-first search (`reachMax` 20,000 road tiles; past that the land counts as linked) runs from each road beside
+  the removed tiles; a side that runs out without meeting a gateway's road gives its neighbouring owners as candidates,
+  with the owners beside the tiles themselves, and each candidate is confirmed by the same search from every road in and
+  round their parcels, before and after. "This public road is the only road link between Bob's land and the gateways:
+  build another way round before taking it up".
+- **Detour.** When other players' traffic was sampled on the tiles within the adoption window: the route cost between
+  the road tiles at the removed tiles' ends, through them and round them (`findRoute` with the tiles as walls, as the
+  street-rules HGV probe does; both searches take HGV bans as walls), and a way round more than `protectDetour` (16)
+  dearer, or none, is refused. "Ada's traffic uses this public road and the way round is 31 tiles longer: build a
+  replacement route before taking it up".
+
+A replacement route already there passes both naturally. A builder (or anyone) may still take up public road nobody else
+depends on, at today's cost. **Road on a player's own parcel stays the owner's call**: it is not protected, even when
+others drive on it. A sandbox has no protection (anyone may change anything there). **Closure notices** (a protected road
+closed after a notice no affected mayor objects to) are left to M5, planning: the notice, the toast and the objection
+belong with its notices.
+
+**Buying the land under a public road** takes the road into the parcel as before: its record goes, and `buy` now
+recounts the parcel's roads at once, so the buyer pays its upkeep from the next midnight (before, a bought road was
+counted only when the server next started or the parcel was edited).
+
+**Client.** The road tool's chip and status line say "3 on unclaimed land: public road, you pay its $1.50/day upkeep (it
+fades after 5 days unused)"; the class picker's note says the same with adoption; the ledger shows the new line through
+`LEDGER_LABELS`; the bulldozer's refusal is an error toast like every other refusal.
+
+**Cost.** Nothing runs per tick per tile. In a 6-district test city (43,000 citizens) with all 8,900 of its road tiles
+made public as a worst case, a sample took 1.6 ms (every 20 ticks) and midnight 3 ms. The protection's searches run only
+on a bulldoze of public road and for fading clusters at midnight.
+
+**Differences from the design.**
+
+- The builder pays for public road only; road on a parcel is still its owner's to pay for, whoever laid it (only the
+  owner may lay road there anyway).
+- Fading is all at once after 5 days, not a gradual "starts to revert", and applies only to public road laid since M3:
+  old public road (a frontier's country road, roads of saves from before M3) never fades and costs nobody.
+- Adoption is measured by the sampler (other owners' citizens or vehicles seen on 3 of the last 5 days), the threshold
+  section 10 left open. A sample every 20 ticks catches a light stream of traffic, not a single car; a road others rely
+  on is protected through the cut-off rule whether or not it was sampled.
+- "The only link to a gateway" is judged from the land's side: a road is kept when some land would be left with no road
+  to any gateway. A road whose removal leaves every piece of land still linked to some gateway may go, even if one
+  gateway loses its road.
+- The detour is between the removed tiles' own ends, with a car's route costs, not the lorry-ban tool's sample lorry;
+  the threshold is a route cost (about a tile of street each), not a share.
+- Street-rule upkeep on public road (an HGV ban on unclaimed land) is still nobody's; undoing an upgrade of a public tile
+  leaves the upgrader its builder.
+- Cheap tracks, frontage contributions and the regional fund are not built (out of scope for M3).

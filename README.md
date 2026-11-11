@@ -163,7 +163,10 @@ it left alone and which newly zoned lots have no road beside them (the hover tur
 only once the building in front grows back into it, or a road reaches it). Streets are named, British style, and
 their owners can rename them (right-click a road); a building's panel gives its address (docs/roads.md).
 Roads can be laid on unclaimed land too (at a premium) so parcels can be joined
-up; zoning needs land you own. Nothing gets built until builders can reach it:
+up: you pay that public road's upkeep, it fades if nothing uses it for five days,
+other players' daily traffic on it gets it adopted (you stop paying), and nobody
+may bulldoze a public road another player depends on (docs/multiplayer-land.md
+"Built: M3 roads"); zoning needs land you own. Nothing gets built until builders can reach it:
 connect to a road network that has a builders' yard, or place your own (your
 first opens at once; later ones are built at urgent priority by whichever
 builders can reach it). Once a game hour the server tells an owner with eight or
@@ -629,8 +632,10 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 - Weather and seasons (docs/weather.md): a seeded world weather with a prevailing wind, a season cycle each game week,
   storms and floods.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
-- Griefing controls: public roads can currently be bulldozed by anyone (docs/multiplayer-land.md section 8: the builder
-  pays upkeep, unused roads fade, roads others depend on are protected).
+- Griefing controls, the rest: public roads are no longer anyone's to bulldoze (M3, docs/multiplayer-land.md "Built: M3
+  roads": the builder pays a public road's upkeep, unused public road fades, road other players use daily is adopted,
+  and a public road other players depend on cannot be taken up). Still to come: closure notices with objections (M5),
+  the regional fund for adopted roads (M4), cheap tracks and frontage contributions.
 
 ## Licence and contributing
 

@@ -1,4 +1,4 @@
-import { ROAD_CLASS_DEFS, TRACK_NAMES, techFor, PUBLIC_ROAD_COST, ROAD_COST, type RoadClassDef } from '@msimcity/shared';
+import { ROAD_CLASS_DEFS, TRACK_NAMES, techFor, PUBLIC_ROAD_COST, ROAD_COST, PUBLIC_ROAD_TUNING, type RoadClassDef } from '@msimcity/shared';
 
 /**
  * The road tool's class picker (docs/roads.md "Classes", shared/src/roadclass.ts): the road tool (3) opens it beside
@@ -112,7 +112,7 @@ export class RoadClassPicker {
       </button>`;
     }).join('');
     const cur = ROAD_CLASS_DEFS[on] ?? ROAD_CLASS_DEFS[0];
-    const about = (d: RoadClassDef) => `<b>${esc(d.title)}</b> ${esc(d.blurb)}<br><span>${esc(d.howTo)} ${d.access === 'pedestrian' ? '' : `Holds ${d.capacity} cars a tile${d.oneWay ? ' (its lanes together)' : ' each way'}. `}Unclaimed land adds $${PUBLIC_ROAD_COST - ROAD_COST} a tile.</span>`;
+    const about = (d: RoadClassDef) => `<b>${esc(d.title)}</b> ${esc(d.blurb)}<br><span>${esc(d.howTo)} ${d.access === 'pedestrian' ? '' : `Holds ${d.capacity} cars a tile${d.oneWay ? ' (its lanes together)' : ' each way'}. `}Unclaimed land adds $${PUBLIC_ROAD_COST - ROAD_COST} a tile, and you pay the upkeep of public road you lay there (it fades after ${PUBLIC_ROAD_TUNING.fadeDays} days unused; once other players' traffic uses it daily it is adopted and you stop paying).</span>`;
     this.el.innerHTML = `<div class="ph"><b>Road</b><span>${ROAD_CLASS_DEFS.length} classes · drag over a road to upgrade it in place</span><button class="x" aria-label="Close">×</button></div>
       <div class="cards">${cards}</div>
       <div class="about">${about(cur)}</div>`;

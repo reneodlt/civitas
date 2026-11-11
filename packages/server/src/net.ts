@@ -9,7 +9,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover, planMiniRoundabout, planBigRoundabout, planInterchange, isMiniAux, isBigIslandAux,
   isRingClassAux, isDeckClassAux, isDividedAux, junctionArmAt, pelicanProblem,
   armState, nextArmState, withArmState, ARM_WORDS, TURN_RULE_COST, PELICAN_COST, type JunctionPlan,
-  isBridgeAux, BRIDGE_STYLE_NAMES,
+  isBridgeAux, bridgeSpanAt, BRIDGE_STYLE_NAMES,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
   planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
@@ -617,7 +617,8 @@ export class Net {
     if (!verdict.ok) return this.toast(c, verdict.reason);
     const parcel = { id: this.w.nextId++, owner: p.id, name: `${p.name}'s plot`, x, y, w, h, taxRate: DEFAULT_TAX, stats: emptyStats() };
     this.w.parcels.set(parcel.id, parcel);
-    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.w.setParcelId(xx, yy, parcel.id);
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.w.setParcelId(xx, yy, parcel.id); // a public road under it leaves World.publicRoads
+    this.w.recountRoads(parcel.id); // ... and its owner pays for it now, as for any road of theirs
     this.w.credit(p.id, -cost, 'land');
     this.w.dirtyParcels.add(parcel.id);
     this.toast(c, `Bought ${w}×${h} tiles for $${cost}`, 'info');
@@ -649,6 +650,10 @@ export class Net {
     if (tool === 'roundabout' || tool === 'flyover' || tool === 'miniroundabout' || tool === 'interchange') return this.junction(c, tool, tiles, dev);
     if (tool === 'turnrule') return this.turnRule(c, tiles, dev);
     if (tool === 'pelican') return this.pelican(c, tiles, dev);
+    if (tool === 'bulldoze') {
+      const why = this.publicRoadRefusal(p, tiles);
+      if (why) return this.toast(c, why);
+    }
     let spent = 0, zoned = false;
     const recount = new Set<number>();
     // zoning and parking lots go round roads and buildings instead of paving over them (counted for one toast)
@@ -798,6 +803,28 @@ export class Net {
     }
   }
 
+  /**
+   * Protected removal of public road (docs/multiplayer-land.md M3, sim/publicroads.ts): the bulldozer's tiles that would
+   * take up road on unclaimed land (a bridge deck takes its whole span) are refused together, with the reason naming who
+   * depends on them, when that would cut another player's land off from the gateways or send their traffic the long way
+   * round. Road on a parcel is its owner's call. A sandbox has no such rule (anyone may change anything there).
+   */
+  private publicRoadRefusal(p: Player, tiles: [number, number][]): string | null {
+    if (this.cfg.sandbox || !Array.isArray(tiles)) return null;
+    const out: [number, number][] = [], seen = new Set<number>();
+    const add = (x: number, y: number) => { const k = tkey(x, y); if (!seen.has(k)) { seen.add(k); out.push([x, y]); } };
+    for (const pair of tiles.slice(0, 256)) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (!Number.isFinite(x) || !Number.isFinite(y) || this.w.parcelIdAt(x, y) !== 0) continue;
+      const t = this.w.peekTile(x, y), a = this.w.auxAt(x, y);
+      if (t === undefined || !isRoad(t)) continue;
+      if (isBridgeAux(a)) { const s = bridgeSpanAt(x, y, (tx, ty) => this.w.auxAt(tx, ty)); if (s) for (let i = 0; i < s.len; i++) add(s.x0 + s.dx * i, s.y0 + s.dy * i); continue; }
+      if (isJunctionAux(a) || isRingClassAux(a) || isDeckClassAux(a) || isRailAux(a) || isAirfieldAux(a)) continue; // these come off and leave the road
+      add(x, y);
+    }
+    return out.length ? this.sim.publicRoads.removalRefusal(out, p.id) : null;
+  }
+
   /** The rules a road drag is planned by (shared/src/roadtool.ts), for this player: their land, their technology. */
   private roadEnv(p: Player, dev: boolean): RoadEnv {
     const pw = dev ? null : this.locked(p, 'publicRoads');
@@ -835,7 +862,7 @@ export class Net {
     for (const tp of plan.tiles) {
       if (tp.state === 'upgrade') {
         const was = this.w.auxAt(tp.x, tp.y);
-        if (this.upgradeRoad(tp.x, tp.y, tp.byte ?? 0)) { undo.classes.push({ x: tp.x, y: tp.y, was, now: this.w.auxAt(tp.x, tp.y) }); undo.refund += tp.cost; const q = this.w.parcelIdAt(tp.x, tp.y); if (q) recount.add(q); }
+        if (this.upgradeRoad(tp.x, tp.y, tp.byte ?? 0)) { undo.classes.push({ x: tp.x, y: tp.y, was, now: this.w.auxAt(tp.x, tp.y) }); undo.refund += tp.cost; const q = this.w.parcelIdAt(tp.x, tp.y); if (q) recount.add(q); else this.sim.publicRoads.laid(tp.x, tp.y, p.id); }
         continue;
       }
       if (tp.state !== 'new' && !(tp.state === 'demolish' && demolish)) continue;
@@ -844,7 +871,7 @@ export class Net {
       this.w.setTile(tp.x, tp.y, packTile(terrainOf(t), true, 0, 0));
       this.w.bump(p.id, 'roads', 1);
       const q = this.w.parcelIdAt(tp.x, tp.y);
-      if (q) recount.add(q);
+      if (q) recount.add(q); else this.sim.publicRoads.laid(tp.x, tp.y, p.id); // public road: its builder pays its upkeep (sim/publicroads.ts)
       // what undo puts back: a zoned lot as it was, empty (a building that came down stays down); anything else bare land
       const lot = isGrowable(zoneOf(t));
       if (tp.byte) this.w.setRoadClass(tp.x, tp.y, tp.byte);
@@ -855,7 +882,7 @@ export class Net {
       if (!b.plan.ok || !b.plan.tiles!.length) continue;
       this.w.placeBridge(b.plan.tiles!);
       this.w.bump(p.id, 'roads', b.plan.tiles!.length / 3);
-      for (let i = 0; i < b.plan.tiles!.length; i += 3) { const q = this.w.parcelIdAt(b.plan.tiles![i], b.plan.tiles![i + 1]); if (q) recount.add(q); }
+      for (let i = 0; i < b.plan.tiles!.length; i += 3) { const q = this.w.parcelIdAt(b.plan.tiles![i], b.plan.tiles![i + 1]); if (q) recount.add(q); else this.sim.publicRoads.laid(b.plan.tiles![i], b.plan.tiles![i + 1], p.id); }
       undo.bridges.push({ x: b.plan.tiles![0], y: b.plan.tiles![1], n: b.plan.tiles!.length / 3 });
       undo.refund += b.plan.cost!;
       const style = BRIDGE_STYLE_NAMES[b.plan.style!];

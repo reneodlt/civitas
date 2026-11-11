@@ -1,5 +1,5 @@
 import { CHUNK_SIZE, seededValues, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
-import { World, emptyProgress, lifeDefaults, citizenLater, type Citizen, type Parcel, type Player, type Site } from './world';
+import { World, emptyProgress, lifeDefaults, citizenLater, tkey, untkey, type Citizen, type Parcel, type Player, type Site, type PublicRoad } from './world';
 import { LIFE, seededAge, ageOf } from './sim/life';
 import { rehire } from './sim/skills';
 import { historyOf, type HistoryJSON } from './history';
@@ -58,7 +58,13 @@ export interface Snapshot {
   streets?: StreetsSave;
   /** road rules (shared/src/roadrules.ts, docs/roads.md "Junctions": turn bans, no entry, signal crossings) by anchor tile; optional, absent in older saves and while there are none */
   roadRules?: RoadRuleDTO[];
+  /**
+   * public road tiles (World.publicRoads, sim/publicroads.ts, docs/multiplayer-land.md M3): who laid each and pays its
+   * upkeep, its use and adoption; optional: a save from before M3 loads with every public road nobody's (`old`)
+   */
+  publicRoads?: SavedPublicRoad[];
 }
+export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
 /**
  * Persistence is a plain JSON snapshot of everything a player has touched.
@@ -88,6 +94,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.start === 'frontier' ? { start: 'frontier' as const, ...(w.home ? { home: w.home } : {}), ...(w.charter ? { charter: { ...w.charter } } : {}) } : {}),
     ...(w.streets.size ? { streets: w.streets.toSave() } : {}),
     ...(w.roadRules.size ? { roadRules: w.roadRulesList() } : {}),
+    ...(w.publicRoads.size ? { publicRoads: [...w.publicRoads].map(([k, r]) => { const [x, y] = untkey(k); return { x, y, ...r, ...(r.u ? { u: { ...r.u } } : {}) }; }) } : {}),
     ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
     ...(w.firesSave ? { fires: w.firesSave() } : {}),
     ...(w.adverts ? advertsField(w.adverts.save()) : {}),
@@ -154,6 +161,11 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   }
   w.streets.load(snap.streets);
   if (Array.isArray(snap.roadRules)) w.loadRoadRules(snap.roadRules);
+  for (const r of Array.isArray(snap.publicRoads) ? snap.publicRoads : []) {
+    if (!r || !Number.isInteger(r.x) || !Number.isInteger(r.y)) continue;
+    const { x, y, ...rest } = r;
+    w.publicRoads.set(tkey(x, y), { ...rest, used: Number(rest.used) || 0, om: Number(rest.om) || 0, od: Number(rest.od) || 0 });
+  }
   for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
   if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   if (snap.adverts && typeof snap.adverts === 'object') w.advertsLoaded = snap.adverts;

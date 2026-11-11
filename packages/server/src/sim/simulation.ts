@@ -34,6 +34,7 @@ import { vehicleTrain } from './timetabled';
 const BUS_ROSTER_CAP = 200;
 import { Carpool, CARPOOL, householdShare, coworkerShare, friendShare, type Candidate } from './carpool';
 import { Gateways, MIG, type Gate } from './gateways';
+import { PublicRoads } from './publicroads';
 import { TrafficControl } from './control';
 import { Mobile, FLEET_VKIND } from './mobile';
 import { Taxis } from './taxis';
@@ -195,6 +196,8 @@ export class Simulation {
   gateways: Gateways;
   /** traffic control (R5): freight routing round HGV bans and 20 zones, the visitor limit, the lorry curfew, the Traffic panel */
   control: TrafficControl;
+  /** public roads (sim/publicroads.ts, docs/multiplayer-land.md M3): the builder's upkeep, use, fading, adoption, protected removal */
+  publicRoads: PublicRoads;
   /** mobile jobs (sim/mobile.ts, docs/mobile-jobs.md): workers on the road, and the taxi service */
   mobile: Mobile;
   taxis: Taxis;
@@ -254,6 +257,7 @@ export class Simulation {
     this.pool = new Carpool(w);
     this.gateways = new Gateways(w);
     this.control = new TrafficControl(w, this.traffic, this.gateways);
+    this.publicRoads = new PublicRoads(w, this.traffic, this.gateways, (owner, msg) => this.notices.push({ owner, msg }));
     this.mobile = new Mobile(w, this.traffic);
     this.taxis = new Taxis(w, this.mobile);
     this.mobile.register(this.taxis);
@@ -297,6 +301,7 @@ export class Simulation {
     perf.begin();
     w.tick++;
     if (w.tick % DAY === 0) this.newDay();
+    this.publicRoads.tick(); // a sample of who is on the public road, every PUBLIC_ROAD_TUNING.sampleTicks
     this.schools.tick();
     this.learning.tick();
     if (w.tick % STATS_EVERY === 0) this.recomputeStats();
@@ -819,6 +824,7 @@ export class Simulation {
       if (++c.idleDays > MAX_IDLE_DAYS) { this.skills.count(c); this.leaveTown(c); }
     }
     this.control.chargeCurfew(); // the lorry curfew's running cost (R5)
+    this.publicRoads.newDay(); // public road: the builders' upkeep, adoption, fading (sim/publicroads.ts)
     w.parkFail.clear(); w.lotIncome.clear();
     this.leisureCache.clear(); // drops homes that are gone; the rest refill on first use
     this.jobMisses.clear(); // likewise
