@@ -183,6 +183,8 @@ export class Fpv {
   private cabKey = '';
   private cabQ = new Quaternion();
   private fogFar = FOG_FAR;
+  /** the weather's fog and rain shorten the street's view (main.ts sets it each frame: 1 clear, down to about 0.2 in thick fog) */
+  fogMul = 1;
   // riding a tube train: the tunnel scene, drawn in place of the street
   private tunnel: TunnelRide | null = null;
   private inTunnel = false;
@@ -948,7 +950,7 @@ export class Fpv {
     if (this.inTunnel && this.tunnel) { this.tunnelPass(renderer, scene); return; }
     const fog = scene.fog as Fog;
     const near = fog.near, far = fog.far;
-    fog.near = FOG_NEAR; fog.far = Math.min(this.fogFar, far);
+    fog.near = FOG_NEAR * this.fogMul; fog.far = Math.min(this.fogFar * this.fogMul, far);
     const vis = hide.map((o) => o.visible);
     for (const o of hide) o.visible = false;
     renderer.render(scene, this.camera);

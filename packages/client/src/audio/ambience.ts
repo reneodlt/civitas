@@ -296,7 +296,7 @@ const during = (h: number, a: number, b: number) => (a <= b ? smooth(a - 0.5, a 
  * The target level and tone of every bed for a scan, a camera distance and an hour. Pure, so a test can read it. `lead` is the district
  * that won the soft-max at the last tick (the Ambience keeps it): it counts a little more, so a street on the border does not flip.
  */
-export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix(), rain = 0, lead: Zn | null = null): Mix {
+export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix(), rain = 0, lead: Zn | null = null, wind = 0): Mix {
   const act = activityAt(hour);
   const near = (full: number, gone: number) => 1 - smooth(full, gone, dist); // 1 close in, 0 zoomed out
   const zo = zonesOf(s, lead, ZSCRATCH), pres = zo.presence;
@@ -305,8 +305,9 @@ export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: M
   out.traffic.level = (0.5 * Math.sqrt(density) + 0.1 * s.road) * lerp(0.45, 1, act) * lerp(1, 0.4, smooth(40, 400, dist)) * lerp(1, byZone(zo, TRAFFIC_BY), pres);
   out.traffic.tone = 0.2 + 0.7 * density;
   const h = smooth(20, 320, dist);
-  out.wind.level = 0.07 + 0.5 * Math.pow(h, 0.8);
-  out.wind.tone = h;
+  // the weather's wind (Ambience.setWeather, 0 calm .. 1 gale) lifts the bed at every zoom and brightens its tone
+  out.wind.level = Math.min(0.57, 0.07 + 0.5 * Math.pow(h, 0.8) + 0.3 * wind);
+  out.wind.tone = Math.min(1, h + 0.4 * wind);
   // the talk of the street: the walkers drawn near (a density, not a count) by the kind of street they are in
   out.crowd.level = 0.4 * Math.sqrt(peopleNear(s, dist)) * lerp(0.6, byZone(zo, CROWD_BY), pres) * act * near(60, 170);
   out.crowd.tone = 0.3 + 0.5 * act;
@@ -408,8 +409,10 @@ export class Ambience {
   private born: Partial<Record<BedId, number>> = {};
   /** seconds each optional bed has been wanted at nothing: it is stopped after a while, freeing its voice */
   private quiet: Partial<Record<BedId, number>> = {};
-  /** the weather hook: rain 0..1. Nothing in the game sets it yet (there is no weather); a future weather system calls setWeather */
+  /** the weather hook (setWeather): rain 0..1, wind 0..1, and whether a storm is on (thunder) */
   private rain = 0;
+  private wind = 0;
+  private storm = false;
   /** the tour stop's bias on the beds (setHint), or null */
   private hint: AmbienceHint | null = null;
   private made = false;
@@ -435,8 +438,11 @@ export class Ambience {
   setHint(h: AmbienceHint | null) { this.hint = h && Object.keys(h).length ? { ...h } : null; }
   get hinted() { return this.hint; }
 
-  /** The weather hook: rain 0 (dry) to 1 (a downpour). Starts the rain beds and, over 0.6, the thunder. Not called by anything yet. */
-  setWeather(rain: number) { this.rain = clamp01(rain); }
+  /**
+   * The weather hook (render/weather.ts calls it every frame): rain 0 (dry) to 1 (a downpour) starts the rain beds, `wind` 0 (calm) to 1 (a gale)
+   * lifts the wind bed and the gusts, and `storm` brings thunder.
+   */
+  setWeather(rain: number, wind = 0, storm = false) { this.rain = clamp01(rain); this.wind = clamp01(wind); this.storm = storm; }
 
   /**
    * A firework shell from the fireworks system (render/fireworks.ts calls this for each shell as a show is scheduled): `at` seconds from now
@@ -485,7 +491,7 @@ export class Ambience {
     const s0 = performance.now();
     const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan, street.off ? undefined : this.visit);
     zonesOf(sc, this.lead, this.zoning); // the district, for the events and the readout; mixFor finds the same one for the beds
-    const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain, this.lead), this.hint, now, this.salt);
+    const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain, this.lead, this.wind), this.hint, now, this.salt);
     const lead = this.lead; this.lead = this.zoning.win; // the winner leads the next tick a little (no flipping on a border)
     for (const id of Object.keys(mix) as BedId[]) { // the optional beds (recordings only) start when wanted and stop after eight quiet seconds
       if (ALWAYS.includes(id)) continue;
@@ -543,7 +549,7 @@ export class Ambience {
     };
     const close = (a: number, b: number) => 1 - smooth(a, b, d);
     const people = peopleNear(sc, d);
-    go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
+    go('gust', (0.045 * smooth(40, 260, d) + 0.12 * this.wind) * (1 + 2 * this.wind), 0.35 + 0.6 * Math.max(smooth(60, 300, d), this.wind));
     // (footsteps follow the walkers drawn within 8 tiles, one voice a side: street.ts)
     // a station's call: a patrol never reports one (the sim sets no emergency flag on a patrol), so the police call stays; the fire engines
     // carry their own sirens (street.ts), so the fire station's is a tenth of what it was, for a town that has a station and no call yet.
@@ -592,7 +598,7 @@ export class Ambience {
       const n = 1 + Math.floor(this.rand() * 3), pan = this.rand() * 1.6 - 0.8;
       for (let i = 0; i < n; i++) fire(eng, 'camera-shutter', { why: placeWhy('camera-shutter', sc, d, hour, lam, lead), seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand(), pan: pan + this.rand() * 0.3 - 0.15, delay: i * (0.25 + this.rand() * 0.7) });
     }
-    go('thunder', 0.02 * smooth(0.6, 0.9, this.rain), 0.5 + 0.5 * this.rand());
+    go('thunder', this.storm ? 0.05 * smooth(0.3, 0.8, this.rain) : 0, 0.5 + 0.5 * this.rand());
   }
 
   /** the beds sounding now, each with what drives it, in words (the audio readout; built only when it is open) */

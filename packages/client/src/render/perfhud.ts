@@ -11,6 +11,7 @@ const LONG_FRAME_MS = 20, SLOW_MS = 33, BAD_MS = 50;
 export const FRAME_PHASES = [
   'input',    // input, the tour's and the flights' camera, the rig
   'light',    // quality, lighting, fog, the underground view
+  'weather',  // the weather state, particles' uniforms and the chip (render/weather.ts)
   'chunks',   // dirty chunks rebuilt (chunkView, roads, lights, parks, junctions, bridges, landmarks, power)
   'world',    // parcels, traffic field, overlays, issue bubbles, fires, graves
   'agents',   // citizens and vehicles interpolated and placed (citizens.frame), lines, the route view, the signals

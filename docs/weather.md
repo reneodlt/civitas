@@ -201,3 +201,56 @@ Temperatures run about -8 to 32 C; storms 0-5% of hours; seed 42's rose puts 37%
 Cost: `weatherAt` 0.1 us warm, about 2 us a call playing on hour by hour from a fresh world, about 170 us for a random jump to a
 cold hour (the snow day's 96 hours), `dayForecast` 40 us. Wet share rises with wetness; wetness over 0.7 gives 55-60%, a little
 wet for a rainy world, tune the constants in `recOf` if it matters.
+
+## Built: W2 (2026-11-11)
+
+Weather now shows and sounds. Client only (no wire, shared or simulation change): `render/weather.ts` (new), and edits to `render/lighting.ts`,
+`render/materials.ts`, `render/fpv.ts`, `render/perfhud.ts`, `audio/ambience.ts`, `main.ts`, `index.html`, `style.css`.
+
+**One read a frame.** `WeatherView.update` calls `weatherAt(tv.worldSeed, liveTickF())` once and eases cloud, rain, fog, wind and snow cover
+towards it (about 1 s time constant, so a clock correction or a front never pops; `reset()` snaps on `welcome`). Everything below reads that
+`state`. The wet-ground value is its own: it soaks in about 2 s once it rains (not for snow) and dries over about 40 s (two game hours).
+
+**What landed.**
+- **Sky and light** (`lighting.ts`): cloud greys the sky colour (luma-matched, a little darker), cuts the sun to 12% at full cloud (shadows fade
+  with it as the hemisphere light fills them; `shadow.radius` softens the edge), desaturates the ground and roofs 40%; fog turns the sky and the
+  distance a pale grey. `celestial.veil = min(1, 0.95 cloud + fog)`. In `main.ts` fog shortens `fog.far` (x0.18 at full fog, x0.7 at full rain)
+  and `fog.near`; first person gets the same through `Fpv.fogMul` (its 46-tile far plane x0.28 in thick fog). The tube and the map view are
+  untouched (the particles are hidden there and underground).
+- **Precipitation** (`weather.ts`): a camera-local volume, world-fixed lattice that wraps round the camera so drops do not slide with it.
+  Rain: 9000 instanced screen-aligned streaks (one draw), thickness at least a pixel, slanted by the wind (up to about 30 degrees; wind dx, dy
+  are tile space so dy goes to world z), tail up-wind, faded at the volume edges and at the lens. Snow: 7000 round points with a drifting
+  sway, bigger than rain's width and slower. Intensity sets how many are drawn (`instanceCount`, `drawRange`). The volume is 14 tiles round the
+  eye in first person, and round the look-at point sized by zoom (16-72 tiles) in the overhead view, with streak length and flake size scaling
+  with it so the look holds from close in to far out.
+- **Wet roads, lying snow, cloud shadows** (`materials.ts`, new `sceneUniforms`: `uWet`, `uSnow`, `uCloud`, `uWindOff`, `uSkyCol`, `uSkyLum`):
+  wet ground darkens (roads 40%, land 12%), wet roads add a sky-coloured sheen at glancing angles; lying snow blends the ground and roofs to
+  white by `snowCover`, each tile and roof with its own threshold so it arrives and melts patchily, roads carrying less than land (they read
+  as gritted), water tiles never (blue-dominant colour test); roofs are the faces with an upward normal; and when cloud is over 12% a soft noise
+  term darkens the ground by day, drifting with the wind (`uWindOff`). All of it is a uniform-gated branch: clear dry weather costs the
+  fragment shader nothing but the tests.
+- **Sound** (`audio/ambience.ts`): `Ambience.setWeather(rain, wind, storm)` is called every frame from `weather.ts`. Rain cross-fades light to
+  heavy by intensity (zero in snow); the wind bed rises with the wind at every zoom (and brightens), gusts come more often; thunder rolls while
+  a `storm` is on (about one every 20 s at full rain). `mixFor` has a trailing `wind` argument (default 0), so `audio-check` is unchanged.
+- **The chip**: `#weather` in the top bar, "☂ 9°C · NW 23 mph" (icon for storm, snow, rain, fog, cloud, sun or moon; "calm" under 2 mph; the
+  wind is named by where it blows from, mph = 1.8 per tile per game hour). The tooltip has the conditions now and every two game hours for the next
+  twelve.
+- **`?weather=rain|snow|fog|storm|clear`** forces the conditions (rain 0.7 at 9 C, snow -2 C with 0.95 lying, fog 0.85, storm 1.0 rain, gale
+  and thunder, clear everything off); the wind direction stays the world's. `window.msc.weather` exposes the view.
+
+**Frame cost.** The weather state, uniforms and chip are about 0.005 ms a frame on the CPU (5000 calls timed: 5 us; the perf HUD has a `weather`
+phase for it, `weather.costMs` averages it over 60 frames). The rain draw adds about 1.0 ms to a frame in headless Chromium on SwiftShader, a
+software rasteriser doing every pixel of 9000 quads on the CPU (3.3 against 2.3 ms and 6.3 against 5.3 ms over two alternating runs of 8 renders), so
+the real GPU cost is well below that; submission is one draw call. Over the 0.5 ms budget only in that software test; measure on a real GPU
+with Shift+M and `?weather=rain` before trusting it on a weak one.
+
+**Screenshots** (`?name=w&weather=...&at=0,0&hour=14`, 1280x720, scale 1, swiftshader): `rain` (dist 40, pitch 30): the sky and light go grey, the
+grass and roofs dull, roads near black, long grey streaks slanting NW to SE with the wind, denser at the front; `rain` close (dist 14): the
+same over the streets, streaks fade at the lens; `storm`: the same at full density with a darker sky and a steeper slant; `snow` (dist 25 and
+40): the ground and every roof white, roads patchy dark, grey sky, flakes of 2-4 pixels; `fog`: the far city washes out to a pale grey within
+about 60 tiles, the ground fades to the sky colour, the sun veiled; `clear`: unchanged from before.
+
+**Not done or noted.** First person was not looked at (a new world has no citizens to ride; the code path sets `fogMul` and the small eye volume, and is
+type-checked only). Trees stay green in snow (W5). No lightning flash (thunder only). No puddles. The void beyond the world's edge draws
+black (as before) rather than fogged; with fog the world's own ground fades correctly. Precipitation is camera-local in both cameras, so the
+first-person inset shows its own volume, not the overhead one's.

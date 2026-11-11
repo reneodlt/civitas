@@ -47,6 +47,7 @@ import { variant, allVariants } from './render/models';
 import { columnHeights } from './pick';
 import { applyToolCursor, applyPickHint } from './cursors';
 import { Lighting } from './render/lighting';
+import { WeatherView, isForced } from './render/weather';
 import { buildAtlas } from './render/atlas';
 import { buildingMaterial, groundMaterial as makeGroundMaterial, sceneUniforms } from './render/materials';
 import { Input, DEV_TOOLS, structureTool, type Rect, type ToolId } from './input';
@@ -93,6 +94,7 @@ renderer.toneMappingExposure = 1.05;
 const scene = new Scene();
 scene.fog = new Fog(0x9fc4e8, 120, 420);
 const lighting = new Lighting(scene, { sky: true });
+const weather = new WeatherView(scene); // rain, snow, fog, wet roads, lying snow and the chip: render/weather.ts (docs/weather.md W2)
 const rig = new CameraRig(1);
 const world = new ClientWorld();
 
@@ -166,6 +168,8 @@ let startShot: CameraShot | null = urlShot(params);
 if (startShot) rig.setShot(startShot);
 if (params.get('hour')) { lighting.mode = 'fixed'; lighting.fixedHour = Number(params.get('hour')); }
 // ?fx=0|1|2 pins shadow quality; otherwise it adapts to frame time
+const weatherParam = params.get('weather'); // ?weather=rain|snow|fog|storm|clear forces the conditions (screenshots)
+if (isForced(weatherParam)) weather.force = weatherParam;
 const fxParam = params.get('fx');
 if (fxParam !== null) lighting.setQuality(Number(fxParam));
 let frameAvg = 16, qualityTimer = 0;
@@ -329,6 +333,7 @@ net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
   buildings.rotors.seed = m.seed;
   tv.worldSeed = m.seed;
+  weather.reset();
   world.me = m.you;
   world.sandbox = !!m.sandbox;
   // a read-only showcase (SPECTATE): only looking; the tool bar, the tech chip, Reset demo and the menu's changes go (style.css body.spectate)
@@ -1438,6 +1443,8 @@ const getTile = (x: number, y: number) => world.getTile(x, y);
 const auxAt = (x: number, y: number) => world.auxAt(x, y);
 let last = performance.now();
 let vehTick = 0, vehAt = performance.now();
+const weatherChip = document.getElementById('weather')!;
+let chipShown = '';
 function frame(now: number) {
   requestAnimationFrame(frame);
   perf.frame(now);
@@ -1451,6 +1458,12 @@ function frame(now: number) {
   mapMode.frameCamera(dt);
   rig.update();
   perf.lap('input');
+  weather.focus.set(rig.target.x, rig.target.z); weather.dist = rig.dist; weather.fpvCamera = fpv.camera;
+  weather.enabled = underground.level < 0.5 && !fpv.tunnelOn;
+  weather.update(dt, liveTickF(), now);
+  const chip = weather.chip;
+  if (chip.title !== chipShown) { chipShown = chip.title; weatherChip.textContent = chip.text; weatherChip.title = chip.title; }
+  perf.lap('weather');
   // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D
   if (!mapMode.on && rig.overZoom > 0.3 && !tour?.flying) mapMode.set(true);
   else if (mapMode.on && rig.underZoom > 0.15) mapMode.set(false);
@@ -1458,6 +1471,7 @@ function frame(now: number) {
   adaptQuality(dt);
 
   underground.frame(dt, renderer);
+  lighting.cloud = weather.state.cloud; lighting.fog = weather.state.fog;
   lighting.update(liveHour(), rig.target, rig.dist, Math.floor(liveTick() / TICKS_PER_DAY), seasonOf(liveTick()).phase);
   if (lighting.celestial) lighting.celestial.visible = underground.level < 0.5;
   underground.look(lighting, renderer);
@@ -1467,6 +1481,10 @@ function frame(now: number) {
   // fog thickens with zoom-out, but never reaches past the loaded chunks when looking toward the horizon
   fog.far = fogFar();
   fog.near = Math.min(rig.dist * 1.6 + 30, fog.far * 0.45);
+  // weather: fog and rain shorten the view in the overhead and the street-level cameras alike
+  const wx = weather.state, vis = (1 - 0.82 * wx.fog) * (1 - 0.3 * wx.rain);
+  fog.far *= vis; fog.near *= 1 - 0.85 * wx.fog;
+  fpv.fogMul = (1 - 0.85 * wx.fog) * (1 - 0.3 * wx.rain);
   perf.lap('light');
 
   chunkWork.frame(rig.camera, rig.target, dt * 1000);
@@ -1635,7 +1653,8 @@ ui.onSound = (id) => audio.ui(id);
 const audioReadout = new AudioReadout(audio, hud, document.getElementById('audioBtn'));
 bindReadoutKey(window, () => audioReadout.toggle());
 fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
-Object.assign((window as any).msc, { perf, lines, audio, audioReadout });
+weather.onSound = (rain, wind, storm) => audio.ambience.setWeather(rain, wind, storm);
+Object.assign((window as any).msc, { perf, lines, audio, audioReadout, weather });
 /** the chunk rebuild scheduler (render/chunkWork.ts); setLegacy(true) brings back the old invalidation and loop for paired measurements */
 (window as any).msc.chunkWork = Object.assign(chunkWork, {
   setLegacy(on: boolean) { chunkWork.legacy = on; world.legacyDirty = on; if (junctions.legacySigns !== on) { junctions.legacySigns = on; if (!on) junctions.signs.rebuild(); } },

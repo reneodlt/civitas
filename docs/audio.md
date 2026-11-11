@@ -29,7 +29,7 @@ Which voices are recorded, and which are not:
 | Districts | metal clank, reversing beeper, steam vent, till, busker, music through a door, revolving door, lift ding, radio through a window, front door, children, camera shutter (and the shop bell, which was a tour cue) |
 | Still synthesised | the four interface clicks (pick, place, refuse, undo): short and tonal, and a synthesised tick is the right sound for them |
 
-What drives the second pass is in `manifest.ts` (the `driven` text of each row) and `ambience.ts` (`places`, and the `mixFor` windows). Two have no source in the game yet and wait on a hook: rain and thunder follow `Ambience.setWeather(rain)` (there is no weather system); a fire engine or an ambulance on a call carries its own siren ("Street life" below); a police patrol never reports a call, so the police siren is still a rare call from a police station in the view. Fireworks follow the fireworks system: `render/fireworks.ts` calls `onShell` for every shell and `Audio.firework` times the bang by distance.
+What drives the second pass is in `manifest.ts` (the `driven` text of each row) and `ambience.ts` (`places`, and the `mixFor` windows). Rain and thunder follow the weather: `Ambience.setWeather(rain, wind, storm)` is called every frame by `render/weather.ts` (docs/weather.md W2); a fire engine or an ambulance on a call carries its own siren ("Street life" below); a police patrol never reports a call, so the police siren is still a rare call from a police station in the view. Fireworks follow the fireworks system: `render/fireworks.ts` calls `onShell` for every shell and `Audio.firework` times the bang by distance.
 
 ### How a recording is played
 

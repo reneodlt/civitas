@@ -1,4 +1,4 @@
-import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping } from 'three';
+import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping, Vector2, Color } from 'three';
 import { ROAD_CLASS_DEFS } from '@msimcity/shared';
 
 /** Side of the data overlay's map (render/overlayMap.ts): one texel per tile, wrapped, so the streamed window (well under this) never needs re-centring. */
@@ -60,6 +60,13 @@ export const sceneUniforms = {
   uHeatMode: { value: 0 },
   /** the street lamps' map (lampTexture) */
   uLampMap: { value: lampTexture as Texture },
+  /** weather (render/weather.ts, docs/weather.md W2): wet ground 0..1, lying snow 0..1, cloud cover 0..1, the clouds' drift in tiles, the sky's colour and brightness (the wet roads' sheen) */
+  uWet: { value: 0 },
+  uSnow: { value: 0 },
+  uCloud: { value: 0 },
+  uWindOff: { value: new Vector2() },
+  uSkyCol: { value: new Color(0.6, 0.7, 0.9) },
+  uSkyLum: { value: 1 },
 };
 export const nightUniform = sceneUniforms.uNight;
 
@@ -127,6 +134,9 @@ uniform float uNight;
 uniform float uHour;
 uniform float uTime;
 uniform float uFarWin;
+uniform float uWet;
+uniform float uSnow;
+uniform float uCloud;
 varying float vWin;
 varying float vTop;
 varying vec4 vFac;
@@ -613,12 +623,21 @@ export function buildingMaterial() {
 }`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>' + FRAG_PARS + 'uniform float uUnder;' + OVL_PARS)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WINDOWS)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WX_ROOF + WINDOWS)
       .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + BUILDING_OVL + GHOST);
   };
   m.customProgramCacheKey = () => 'msc-windows';
   return m;
 }
+
+/** Weather on buildings: walls darken a little when wet, roofs take a white blend by the snow lying (each roof its own threshold, so they do not all turn at once). */
+const WX_ROOF = /* glsl */ `
+if (uCloud > 0.001) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), 0.4 * uCloud);
+if (uWet > 0.001) diffuseColor.rgb *= 1.0 - 0.14 * uWet;
+if (uSnow > 0.001 && vLocalN.y > 0.6) {
+  float h = mscHash(floor(vOrigin));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.95, 1.0), 0.94 * smoothstep(h * 0.4, h * 0.4 + 0.3, uSnow * 1.15) * (1.0 - uUnder));
+}`;
 
 /** The underground view: buildings go cool, grey and nearly clear so the layer below reads. */
 const GHOST = /* glsl */ `
@@ -649,6 +668,11 @@ uniform float uTime;
 uniform float uHeat;
 uniform float uHeatMode;
 uniform float uUnder;
+uniform float uWet;
+uniform float uSnow;
+uniform float uCloud;
+uniform vec2 uWindOff;
+uniform vec3 uSkyCol;
 uniform sampler2D uLampMap;
 varying float vRoad;
 varying float vHeat;
@@ -673,6 +697,38 @@ vec3 mscLamp(vec2 tile, vec2 p) {
   else if (pl > 0.004) on *= 1.0 - pl * 0.8;
   vec3 c = led > 0.5 ? vec3(0.88, 0.92, 1.0) : vec3(1.0, 0.78, 0.45);
   return c * pool * on * (0.75 + 0.6 * bright);
+}`;
+
+/**
+ * Weather on the ground (before the lamps and the lighting): wet ground darkens, roads more; lying snow blends to white, patchy by tile,
+ * thinner on roads, never on water (blue-dominant tiles). Land and roads only; the underground view fades it.
+ */
+const WX_GROUND = /* glsl */ `
+if (uCloud > 0.001) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), 0.4 * uCloud);
+if (uWet > 0.001 || uSnow > 0.001) {
+  float isRoad = step(16.0, vRoad);
+  diffuseColor.rgb *= 1.0 - uWet * mix(0.12, 0.4, isRoad);
+  if (uSnow > 0.001) {
+    float h = mscHash(floor(vWorldP.xz));
+    float cover = uSnow * mix(1.15, 0.42, isRoad);
+    float k = smoothstep(h * 0.4, h * 0.4 + 0.3, cover);
+    k *= 1.0 - smoothstep(0.02, 0.08, diffuseColor.b - max(diffuseColor.r, diffuseColor.g)) ;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.95, 1.0), 0.94 * k * (1.0 - uUnder));
+  }
+}`;
+
+/** After the lighting: wet roads shine with the sky at a glancing view, and clouds' shadows drift over the land by day. */
+const WX_GROUND_LIT = /* glsl */ `
+if (uWet > 0.001 && vRoad >= 16.0) {
+  float f = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 3.0);
+  gl_FragColor.rgb += uSkyCol * uWet * (0.03 + 0.45 * f) * 0.5 * (1.0 - uUnder);
+}
+if (uCloud > 0.12 && uNight < 0.9) {
+  vec2 q = (vWorldP.xz - uWindOff) * 0.055;
+  float n = sin(q.x + 1.7 * sin(q.y * 0.7)) * sin(q.y * 1.1 + 1.3 * sin(q.x * 0.6)) * 0.4 + 0.5 * sin(q.x * 2.3 + q.y * 1.9 + 1.0) * 0.25 + 0.5;
+  float t = 1.05 - uCloud;
+  float sh = smoothstep(t - 0.12, t + 0.12, n) * 0.3 * (1.0 - 0.6 * smoothstep(0.7, 1.0, uCloud)) * (1.0 - uNight) * (1.0 - uUnder);
+  gl_FragColor.rgb *= 1.0 - sh;
 }`;
 
 /** aRoad: 16 + the N E S W road bits on a road tile; 1 or more on a tile with a road among its eight neighbours. */
@@ -765,8 +821,8 @@ export function groundMaterial(atlas: Texture, road = false) {
       .replace('#include <project_vertex>', '#include <project_vertex>\n vWorldP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>' + GROUND_FRAG_PARS + OVL_PARS)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + LAMPS)
-      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT + GROUND_OVL + GROUND_UNDER);
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WX_GROUND + LAMPS)
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + WX_GROUND_LIT + HEAT + GROUND_OVL + GROUND_UNDER);
   };
   m.customProgramCacheKey = () => 'msc-ground';
   return m;

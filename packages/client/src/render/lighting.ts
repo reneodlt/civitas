@@ -33,6 +33,9 @@ export class Lighting {
   private lr = new Vector3();
   private lu = new Vector3();
   private tmp = new Color();
+  /** the weather's cloud cover and fog, 0..1 (render/weather.ts, set by main.ts before `update`): they grey the sky, dim and soften the sun and veil the celestial bodies */
+  cloud = 0;
+  fog = 0;
   /** the sun and moon drawn in the sky, along this light's direction (only for the main view: thumbnails leave it out) */
   readonly celestial: Celestial | null;
 
@@ -76,6 +79,7 @@ export class Lighting {
     // the light comes from the sun by day and from the moon (opposite it) by night, never quite grazing the ground
     const dir = elev >= 0 ? new Vector3(s.x, Math.max(elev, 0.05), s.z) : new Vector3(-s.x, Math.max(-elev, 0.1), -s.z);
     dir.normalize();
+    if (this.celestial) this.celestial.veil = Math.min(1, this.cloud * 0.95 + this.fog);
     this.celestial?.update(s, gameDay);
     // the shadow camera moves in whole texels of its own map as the view pans (in the light's axes), so a shadow's edge stays
     // on the same texels instead of crawling and shimmering over lit surfaces; the light's direction is unchanged
@@ -108,6 +112,23 @@ export class Lighting {
     sceneUniforms.uNight.value = 1 - smooth(-0.12, 0.1, elev);
     sceneUniforms.uHour.value = h;
     sceneUniforms.uTime.value = performance.now() / 1000;
+
+    // weather: cloud greys the sky and the sky's light and diffuses the sun (shadows fade with it: the hemisphere light fills them in),
+    // fog turns the sky and the distance a pale grey. Luma-matched so a grey day is not brighter than a blue one.
+    const cl = this.cloud, fg = this.fog;
+    if (cl > 0.001 || fg > 0.001) {
+      const lum = this.sky.r * 0.299 + this.sky.g * 0.587 + this.sky.b * 0.114;
+      this.sky.lerp(this.tmp.setRGB(lum * 0.86, lum * 0.9, lum * 0.97), 0.78 * cl);
+      this.sky.multiplyScalar(1 - 0.22 * cl);
+      const flum = Math.max(0.09, lum * 1.05 + 0.1 * day);
+      this.sky.lerp(this.tmp.setRGB(flum * 0.93, flum * 0.96, flum), 0.88 * fg);
+      this.sun.intensity *= 1 - 0.88 * cl - 0.1 * fg;
+      this.hemi.intensity *= 1 - 0.12 * cl * day;
+      this.hemi.color.lerp(this.tmp.setRGB(0.78, 0.82, 0.88), 0.4 * cl * day);
+      this.sun.shadow.radius = 1 + 3 * cl;
+    } else this.sun.shadow.radius = 1;
+    sceneUniforms.uSkyCol.value.copy(this.sky);
+    sceneUniforms.uSkyLum.value = Math.min(1, (this.sky.r * 0.299 + this.sky.g * 0.587 + this.sky.b * 0.114) * 1.6);
 
     // shadow frustum sized to what is on screen
     const extent = Math.min(170, Math.max(22, dist * 1.35));

@@ -16,6 +16,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 /* the home page (landing.ts) is its own plain page: nothing of the game shows, and nothing of it has been loaded */
 body.landing #c, body.landing #ui, body.landing #login { display: none; }
 .stat { color: var(--muted); font-variant-numeric: tabular-nums; }
+#weather { white-space: nowrap; }
 .stat b { color: var(--fg); font-weight: 600; }
 #heat { margin-left: auto; }
 .chip.on { background: rgba(98,210,162,0.18); border-color: rgba(98,210,162,0.6); }
