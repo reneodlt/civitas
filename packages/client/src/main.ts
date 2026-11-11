@@ -471,6 +471,7 @@ const planningPanel = new PlanningPanel({
   tick: () => liveTick(),
   jump: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(rig.dist, 40); },
   act: (id, act, extra) => net.send({ t: 'planningAct', id, act, ...extra }),
+  campaign: (m) => net.send({ t: 'planCampaign', ...m }),
 });
 const planningSigns = new PlanningSigns();
 scene.add(planningSigns.group);

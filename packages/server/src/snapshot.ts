@@ -76,6 +76,8 @@ export interface Snapshot {
   landDeals?: LandDealsSave;
   /** planning applications, refused designs and approved conditions (sim/planning.ts PlanningSave, docs/multiplayer-land.md M5); optional, absent in older saves and while there are none */
   planning?: object;
+  /** M6 campaigns on plans, credibility per player per sector, claims awaiting the truth, area reputation (sim/campaigns.ts CampaignsSave); optional */
+  campaigns?: object;
 }
 export type SavedPublicRoad = PublicRoad & { x: number; y: number };
 
@@ -117,6 +119,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
     ...(w.landDealsSave ? landDealsField(w.landDealsSave()) : {}),
     ...(w.planningSave ? planningField(w.planningSave()) : {}),
+    ...(() => { const c = w.campaignsSave?.(); return c ? { campaigns: c } : {}; })(),
   };
 }
 
@@ -200,6 +203,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
   if (snap.landDeals && typeof snap.landDeals === 'object') w.landDealsLoaded = snap.landDeals;
   if (snap.planning && typeof snap.planning === 'object') w.planningLoaded = snap.planning;
+  if (snap.campaigns && typeof snap.campaigns === 'object') w.campaignsLoaded = snap.campaigns;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

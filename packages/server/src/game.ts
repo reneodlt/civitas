@@ -14,6 +14,7 @@ import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
 import { News } from './sim/news';
 import { Planning } from './sim/planning';
+import { PlanCampaigns } from './sim/campaigns';
 import { Utilities } from './sim/utilities';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
@@ -57,6 +58,8 @@ export interface Game {
   news: News;
   /** planning notices, the residents' vote and road closure notices (sim/planning.ts, docs/multiplayer-land.md M5) */
   planning: Planning;
+  /** campaigns on planning applications, credibility per sector, area claims (sim/campaigns.ts, docs/multiplayer-land.md M6) */
+  campaigns: PlanCampaigns;
   /** utilities (sim/utilities.ts, docs/utilities.md): the power networks, the hourly solve, bills, faults and repair vans */
   utilities: Utilities;
   net: Net;
@@ -134,6 +137,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const planning = new Planning(world, sim, (cfg.planning ?? land.market) && !cfg.sandbox && !cfg.spectate);
   planning.news = news;
   net.planning = planning;
+  // campaigns on plans (sim/campaigns.ts, M6): posters, TV, leaflets and meetings move the roll's beliefs; credibility per sector
+  const campaigns = new PlanCampaigns(world, sim, adverts, planning);
+  net.campaigns = campaigns;
   // death and remembrance (sim/death.ts, docs/remembrance.md): a fire or blast harms the people inside, an incident's dead make
   // the news, the dead waiting for burial space badge their mortuary
   fires.onHarm = (e) => sim.death.harm(e);
@@ -163,9 +169,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const perf = sim.perf;
   net.perf = perf;
-  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); perf.lap('systems'); };
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); campaigns.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, campaigns, utilities, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

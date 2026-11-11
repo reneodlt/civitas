@@ -80,7 +80,15 @@ export const AD_THEMES = ['Money', 'Family', 'Status', 'Roots', 'Time', 'Adventu
  * What a campaign says, per theme (docs/adverts.md section 3): templates filled with real names, never free text, so
  * there is nothing to moderate. {place} is the target parcel's or estate's name, {building} a workplace's name.
  */
-export interface AdClaim { theme: number; text: string; needs: 'place' | 'building' | null }
+export interface AdClaim {
+  theme: number; text: string; needs: 'place' | 'building' | null;
+  /**
+   * Area claims (docs/multiplayer-land.md section 6 "Opinion about areas", M6): about a parcel's neighbourhood kind (a
+   * ValueKind): `high` says the kind is high there, `good` whether that is praise. An area claim may name someone else's
+   * parcel, and then it must be true when posted (checked against the M1 field) and stay true while it runs.
+   */
+  kind?: number; high?: boolean; good?: boolean;
+}
 export const AD_CLAIMS: AdClaim[] = [
   { theme: 0, text: 'Low rents in {place}', needs: 'place' },
   { theme: 0, text: '{building} pays well', needs: 'building' },
@@ -96,7 +104,14 @@ export const AD_CLAIMS: AdClaim[] = [
   { theme: 4, text: 'Shop local at {building}', needs: 'building' },
   { theme: 5, text: 'Something new in {place}', needs: 'place' },
   { theme: 5, text: 'Come and see {place}', needs: 'place' },
+  // area claims (M6): kinds 8 access, 0 noise, 1 smell, 6 green (shared/src/value.ts ValueKind)
+  { theme: 5, text: '{place} is up-and-coming', needs: 'place', kind: 8, high: true, good: true },
+  { theme: 4, text: '{place} is noisy', needs: 'place', kind: 0, high: true, good: false },
+  { theme: 1, text: '{place} reeks', needs: 'place', kind: 1, high: true, good: false },
+  { theme: 3, text: 'Leafy {place}', needs: 'place', kind: 6, high: true, good: true },
 ];
+/** Whether claim `i` is an area claim (about a parcel's kind: may name someone else's land if true). */
+export const isAreaClaim = (i: number) => AD_CLAIMS[i]?.kind !== undefined;
 /** The claim with its names filled in, or null when the claim needs a name the target does not give. */
 export function claimText(claim: number, names: { place?: string; building?: string }): string | null {
   const c = AD_CLAIMS[claim];
@@ -128,7 +143,7 @@ export const unpackLook = (look: number) => ({ layout: Math.floor(look / 64) % 3
 export const THEME_ICON = [1, 0, 2, 3, 4, 5];
 
 /** What a campaign is about: one of the player's parcels (its name, or its estate's) or a workplace on their land (its sign). */
-export interface AdTarget { kind: 'parcel' | 'building'; id: number; x?: number; y?: number }
+export interface AdTarget { kind: 'parcel' | 'building' | 'plan'; id: number; x?: number; y?: number }
 /** A campaign as everyone sees it (its posters are on everyone's streets). */
 export interface CampaignDTO {
   id: number; owner: string; theme: number; claim: number; look: number;

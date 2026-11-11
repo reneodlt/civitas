@@ -440,6 +440,16 @@ changing behaviour in game time.
   back and the site cools off, then needs a cleaner design. The **Planning** chip opens the panel: open applications,
   their impact by kind, time left, conditions and offer; the applicant adds conditions, raises the offer or withdraws.
   `server/src/sim/planning.ts`, `shared/src/planning.ts`, `client/src/planning.ts`; `npm run planning:check`.
+  *Campaigns on a plan* (docs/multiplayer-land.md "Built: M6"): the applicant and the owners of land in the zone may
+  campaign in the Planning panel with a claim from a table (For or Against by value, or "Have your say: vote by ..."):
+  posters on the voters' streets (rented from the Campaigns panel, no Advertising tech needed), TV spots, leaflets
+  through the roll's doors and a public meeting where both sides may speak (the truer case gains more). Each side's
+  spending is capped at the plan's cost; nothing new in the last game hour. Once a plan is built, residents find out
+  which claims were true: a smelly "odour-free" tip costs its applicant credibility in that sector of the map, a scare
+  that proved false costs the objector, and credibility multiplies your campaigns there. Area claims ("Bobton is noisy")
+  about someone else's land must be true when posted and come down with a fine if they stop being true; posters about
+  a place sway where movers look for a home for a while. `server/src/sim/campaigns.ts`, `shared/src/campaigns.ts`;
+  `npm run campaign:check`.
   A citizen without a car (or out for the night) weighs a taxi against walking, the bus and driving; homes order food
   at lunch and dinner and get parcels. The workers keep their ordinary jobs, so jobs and housing stay balanced; fares,
   meals, collection fees and parcel fees go to the owners. Tooltips show cab offices, takeaways and depots at work and
@@ -660,8 +670,8 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 - Binary wire format (the protocol is already flat numeric arrays for the hot
   messages, so this is mechanical).
 - Utilities, avenues and transit, and a proper economy loop for commercial/industrial income. Designed in
-  docs/multiplayer-land.md: campaigns on planning applications and service contracts between players (built: the land
-  market with listings, offers, covenants, leases and neighbour pacts, M7; planning votes, M5).
+  docs/multiplayer-land.md: service contracts between players (built: the land market with listings, offers,
+  covenants, leases and neighbour pacts, M7; planning votes, M5; campaigns on plans and credibility, M6).
 - Weather and seasons (docs/weather.md): a seeded world weather with a prevailing wind, a season cycle each game week,
   storms and floods.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
