@@ -551,5 +551,13 @@ export const WEATHER_TUNING = {
   // ---- construction (Simulation.workSite)
   /** site work × this in frost (at or below 0 C, or lying snow over 0.3) and × heavyRainBuild in rain over heavyRain */
   frostBuild: 0.7, heavyRainBuild: 0.8, heavyRain: 0.75,
+
+  // ---- seasons and health (W5; sim/weatherfx.ts seasonHealthNow, sim/simulation.ts lifeHealth, sim/death.ts lifeRoll)
+  /** the flu season: the yearly wave peaks in mid-winter; a cold day (the day's low under fluColdFrom C) raises everyone's flu chance by up to × (1 + fluCold) */
+  fluCold: 0.6, fluColdFrom: 4,
+  /** a heatwave (the day's high at or over heatwaveFrom C) or a cold snap (the low at or under coldSnapFrom C): thermal stress 0..1 over the next heatwaveSpan / coldSnapSpan degrees */
+  heatwaveFrom: 27, heatwaveSpan: 6, coldSnapFrom: -3, coldSnapSpan: 6,
+  /** at full stress: the old-age death chance of someone from thermalAge × (1 + thermalDeath), and thermalHealth points of health lost a day (people from thermalAge - 5) */
+  thermalAge: 70, thermalDeath: 0.6, thermalHealth: 2,
 };
 export type WeatherTuning = typeof WEATHER_TUNING;

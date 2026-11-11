@@ -1,6 +1,6 @@
 import { CanvasTexture, WebGLRenderTarget, PerspectiveCamera, LinearFilter, SRGBColorSpace, Vector3, type Texture, type WebGLRenderer, type Scene, type Object3D } from 'three';
 import {
-  CIVITAS_CHANNELS, dayForecast, severeOutlook, warningText, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, leisureAt, eventOn, eventStartAt, isLeisure,
+  CIVITAS_CHANNELS, dayForecast, severeOutlook, warningText, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, seasonDate, seasonOf, leisureAt, eventOn, eventStartAt, isLeisure,
   isRoad, zoneOf, levelOf, CHUNK_SIZE, RANKS, TRANSIT, TAXI, FOOD, CITIES, WEEKDAY_NAMES, TICKS_PER_DAY, TICKS_PER_HOUR, Zone,
   type TvChannel, type Programme, type Genre, type HeliState, type StoryDTO, type CitizenInfo, type RankDTO, type ServerMsg, type LeisureSpec,
 } from '@msimcity/shared';
@@ -69,7 +69,7 @@ interface Gfx { canvas: HTMLCanvasElement; g: CanvasRenderingContext2D; tex: Can
  */
 export function forecast(day: number, chSeed = 0, worldSeed = 0) {
   const f = dayForecast(worldSeed, day);
-  return { ...f, local: (i: number) => f.hi - 2 + Math.floor(hash2(day * 7 + i, 1706 + chSeed) * 5) };
+  return { ...f, season: seasonDate(seasonOf(day * TICKS_PER_DAY + TICKS_PER_DAY / 2).phase), local: (i: number) => f.hi - 2 + Math.floor(hash2(day * 7 + i, 1706 + chSeed) * 5) };
 }
 
 /** A football club's name for a stadium: its place's name and a suffix. */
@@ -413,7 +413,7 @@ export class TvGuide implements TvSource {
     g.fillText(`${WEEKDAY_NAMES[((day % 7) + 7) % 7]}: ${fc.sky}`, 10, 21);
     g.textAlign = 'right'; g.fillText(`${fc.lo}° to ${fc.hi}°`, GFX_W - 10, 21); g.textAlign = 'left';
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, GFX_H - 22, GFX_W, 22);
-    g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif'; g.fillText(`${ch.name} weather · wind ${fc.windFrom} ${fc.wind} mph`, 10, GFX_H - 7);
+    g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif'; g.fillText(`${ch.name} weather · ${fc.season.label} · wind ${fc.windFrom} ${fc.wind} mph`, 10, GFX_H - 7);
     // a storm or flood warning (docs/weather.md W6): a red band under the title, the same outlook the server warns from
     const warn = severeOutlook(this.worldSeed, tick)[0];
     if (warn) {
@@ -469,7 +469,7 @@ export class TvGuide implements TvSource {
     // 140 weather
     const day = Math.floor(tick / TICKS_PER_DAY), fc = forecast(day, ch.seed, this.worldSeed), tm = forecast(day + 1, ch.seed, this.worldSeed);
     out.push({ no: 140, title: 'WEATHER', band: '#008000', lines: [
-      ['TODAY', '#ff0'], [`${fc.sky}.`, '#fff'], [`Highs of ${fc.hi}C, lows of ${fc.lo}C.`, '#fff'], [`Wind ${fc.windFrom}, ${fc.wind} mph.`, '#fff'], ['', '#fff'],
+      ['TODAY', '#ff0'], [`${fc.sky}. ${fc.season.label}, ${fc.season.date}.`, '#fff'], [`Highs of ${fc.hi}C, lows of ${fc.lo}C.`, '#fff'], [`Wind ${fc.windFrom}, ${fc.wind} mph.`, '#fff'], ['', '#fff'],
       ['TOMORROW', '#ff0'], [`${tm.sky}. ${tm.lo}C to ${tm.hi}C.`, '#0ff'],
       // storm and flood warnings a game day ahead (docs/weather.md W6)
       ...severeOutlook(this.worldSeed, tick).flatMap((e): [string, string][] => [['', '#fff'], ...lines(warningText(e, Math.floor(tick / TICKS_PER_HOUR)), 37).map((l): [string, string] => [l, '#f44'])]),

@@ -51,6 +51,7 @@ import { columnHeights } from './pick';
 import { applyToolCursor, applyPickHint } from './cursors';
 import { Lighting } from './render/lighting';
 import { WeatherView, isForced } from './render/weather';
+import { isSeasonName, SEASON_PHASE } from './render/seasons';
 import { buildAtlas } from './render/atlas';
 import { buildingMaterial, groundMaterial as makeGroundMaterial, sceneUniforms } from './render/materials';
 import { Input, DEV_TOOLS, structureTool, type Rect, type ToolId } from './input';
@@ -175,6 +176,10 @@ if (params.get('hour')) { lighting.mode = 'fixed'; lighting.fixedHour = Number(p
 // ?fx=0|1|2 pins shadow quality; otherwise it adapts to frame time
 const weatherParam = params.get('weather'); // ?weather=rain|snow|fog|storm|clear forces the conditions (screenshots)
 if (isForced(weatherParam)) weather.force = weatherParam;
+// ?season=spring|summer|autumn|winter forces the year phase for the light, trees, ground, the chip and (by whole game days) the weather (screenshots)
+const seasonParam = params.get('season');
+const forcedYear = isSeasonName(seasonParam) ? SEASON_PHASE[seasonParam] : null;
+if (forcedYear !== null) weather.yearPhase = forcedYear;
 const fxParam = params.get('fx');
 if (fxParam !== null) lighting.setQuality(Number(fxParam));
 let frameAvg = 16, qualityTimer = 0;
@@ -1571,7 +1576,7 @@ function frame(now: number) {
 
   underground.frame(dt, renderer);
   lighting.cloud = weather.state.cloud; lighting.fog = weather.state.fog;
-  lighting.update(liveHour(), rig.target, rig.dist, Math.floor(liveTick() / TICKS_PER_DAY), seasonOf(liveTick()).phase);
+  lighting.update(liveHour(), rig.target, rig.dist, Math.floor(liveTick() / TICKS_PER_DAY), forcedYear ?? seasonOf(liveTick()).phase);
   if (lighting.celestial) lighting.celestial.visible = underground.level < 0.5;
   underground.look(lighting, renderer);
   scene.background = lighting.sky;

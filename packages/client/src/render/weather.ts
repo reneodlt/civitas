@@ -2,7 +2,7 @@ import {
   BufferAttribute, BufferGeometry, Color, DoubleSide, Group, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Points, ShaderMaterial, Vector2, Vector3,
   type Camera, type PerspectiveCamera, type WebGLRenderer, type Scene,
 } from 'three';
-import { weatherAt, TICKS_PER_HOUR, type Weather } from '@msimcity/shared';
+import { weatherAt, seasonDate, seasonOf, TICKS_PER_HOUR, TICKS_PER_DAY, type Weather } from '@msimcity/shared';
 import { sceneUniforms } from './materials';
 
 /**
@@ -165,6 +165,10 @@ export class WeatherView {
   private snowOff = new Vector3();
   private time = 0;
   private lastWet = 0;
+  /** `?season=`: whole game days added to the clock for the weather and the chip, so a forced winter has winter's weather (main.ts) */
+  tickShift: number | null = null;
+  /** `?season=`: the year phase shown (the chip's season and date) instead of the clock's */
+  yearPhase: number | null = null;
   private chipAt = -1e9;
   private chipText = '';
   private chipTip = '';
@@ -232,6 +236,8 @@ export class WeatherView {
   /** Once a frame, from the live fractional tick. `liveHour`: the game hour (0-24), for the chip's day or night icon. */
   update(dt: number, tickF: number, nowMs: number) {
     const t0 = performance.now();
+    if (this.yearPhase !== null && this.tickShift === null) this.tickShift = (((Math.round((this.yearPhase - seasonOf(tickF).phase) * 7) % 7) + 7) % 7) * TICKS_PER_DAY;
+    tickF += this.tickShift ?? 0;
     const w = weatherAt(this.seed(), tickF);
     this.raw = w;
     const f = this.force ? FORCED[this.force] : null;
@@ -306,8 +312,9 @@ export class WeatherView {
     const icon = (c: { cloud: number; rain: number; snow: boolean; fog: number; storm: boolean }, hr: number) =>
       c.storm ? '⛈' : c.rain > 0.1 ? (c.snow ? '❄' : '☂') : c.fog > 0.4 ? '🌫' : c.cloud > 0.65 ? '☁' : c.cloud > 0.3 ? (hr >= 6 && hr < 20 ? '⛅' : '☁') : hr >= 6 && hr < 20 ? '☀' : '☾';
     const mph = Math.round(s.windK * 28 * MPH), from = windFrom(s.dx, s.dy);
-    this.chipText = `${icon({ cloud: s.cloud, rain: s.rain, snow: s.snow, fog: s.fog, storm: s.storm }, hour)} ${Math.round(s.tempC)}°C · ${mph < 2 ? 'calm' : `${from} ${mph} mph`}`;
-    const lines = [`Now: ${describe(s.cloud, s.rain, s.snow, s.fog, s.storm)}, ${Math.round(s.tempC)}°C, wind from the ${from} at ${mph} mph${s.snowCover > 0.2 ? `, snow lying (${Math.round(s.snowCover * 100)}%)` : ''}`];
+    const sd = seasonDate(this.yearPhase ?? seasonOf(tickF).phase);
+    this.chipText = `${sd.label} · ${icon({ cloud: s.cloud, rain: s.rain, snow: s.snow, fog: s.fog, storm: s.storm }, hour)} ${Math.round(s.tempC)}°C · ${mph < 2 ? 'calm' : `${from} ${mph} mph`}`;
+    const lines = [`${sd.label}, ${sd.date}`, `Now: ${describe(s.cloud, s.rain, s.snow, s.fog, s.storm)}, ${Math.round(s.tempC)}°C, wind from the ${from} at ${mph} mph${s.snowCover > 0.2 ? `, snow lying (${Math.round(s.snowCover * 100)}%)` : ''}`];
     const seed = this.seed();
     for (let i = 1; i <= 6; i++) {
       const x = weatherAt(seed, tickF + i * 2 * TICKS_PER_HOUR), hr = Math.floor(hour + i * 2) % 24;

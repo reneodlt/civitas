@@ -51,8 +51,8 @@ import { Learning, ERRAND_CLASS } from './learning';
 import { Death, ERRAND_FUNERAL } from './death';
 import { Motivation, MOTIVATION, inheritValues, essentialJob, type MotiveHost } from './motivation';
 import { ValueField } from './value';
-import { weatherNow, moodNow, driveMinFor } from './weatherfx';
-import { leisureMul } from '@msimcity/shared';
+import { weatherNow, moodNow, driveMinFor, seasonHealthNow, SEASON_FX } from './weatherfx';
+import { leisureMul, WEATHER_TUNING } from '@msimcity/shared';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -1839,6 +1839,7 @@ export class Simulation {
     if (c.cond & Cond.Flu) h -= HEALTH.fluCost;
     if (c.cond & Cond.Injury) h -= HEALTH.injuryCost;
     if (c.cond & Cond.Chronic) h -= HEALTH.chronicCost;
+    if (SEASON_FX && age >= WEATHER_TUNING.thermalAge - 5) h -= WEATHER_TUNING.thermalHealth * seasonHealthNow(w).stress; // a heatwave or a cold snap (W5)
     h += (Math.random() - 0.5) * 2;
     c.health = Math.max(0, Math.min(100, h));
     if (c.cond & ACUTE) {
@@ -1847,7 +1848,8 @@ export class Simulation {
     } else if (c.care < 0 && Math.random() < 0.15) c.care = 0; // a chronic illness gets a check-up now and then
     const frail = (c.health < 50 ? 1.5 : 1) * (c.stage !== LifeStage.Adult ? 1.5 : 1);
     if (!(c.cond & Cond.Flu)) {
-      let p = (HEALTH.fluBase + HEALTH.fluSeason * fluWave(w.tick / DAY)) * frail * (0.5 + hash2(c.id, 217));
+      let p = (HEALTH.fluBase + HEALTH.fluSeason * fluWave(w.tick / DAY, SEASON_FX ? HEALTH.fluPeak : HEALTH.fluPeakOld)) * frail * (0.5 + hash2(c.id, 217));
+      if (SEASON_FX) p *= seasonHealthNow(w).fluMul; // a cold day spreads it (W5)
       if (hh && hh.ids.some((id) => id !== c.id && ((w.citizens.get(id)?.cond ?? 0) & Cond.Flu))) p *= HEALTH.fluHousehold;
       if (Math.random() < p) this.fallIll(c, Cond.Flu, HEALTH.fluDaysMin + Math.random() * (HEALTH.fluDaysMax - HEALTH.fluDaysMin));
     }

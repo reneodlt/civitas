@@ -449,3 +449,70 @@ hundred hours of river level recomputed); in steady play the outlook adds one ho
 - `ROAD_WEATHER.gritted` is process-wide (the last game made sets it: right for a server or a local game); the traffic
   reads its own world's `Traffic.gritted`, so checks with several games stay right.
 - Insurance is the `floodInsured` hook only.
+
+## Built: W5 (2026-11-11)
+
+Seasons in full. Client: `render/seasons.ts` (new), edits to `render/lighting.ts`, `render/materials.ts`, `render/roads.ts`, `render/parks.ts`,
+`render/weather.ts`, `render/tv.ts`, `main.ts`, `ui.ts`. Shared: `seasonDate(phase)` in `weather.ts`, a block of `WEATHER_TUNING`. Server: `sim/weatherfx.ts`
+(`seasonHealthNow`, `SEASON_FX`), small additive edits to `sim/life.ts`, `sim/simulation.ts` (`lifeHealth`) and `sim/death.ts` (`lifeRoll`). No wire change, no save change.
+
+**Street lamps and lit windows follow the real dusk.** `uNight` already came from the sun's elevation (`sunAt`), so the lamps were not on a clock hour; what
+was fixed to the equinox was the sky reflected in window glass (`mscSky(hour)` took the sine of the hour) and the windows' evening schedule. Now:
+`Lighting.update` sets `uElev` (the sun's height now), `uDusk` (the hour the sun is 3 degrees up on its way down, bisected from `sunAt` and cached while the
+phase moves under 0.002) and `uYear`; the glass reflects `uElev`; the windows' schedule (`mscOnAt`, `mscOffAt`, near panes and the far `mscLitShare`) brings
+"lights on" forward to dusk when dusk is early (`on = min(on, dusk - 0.5 + 0.6 (on - 16))`) and keeps people up a little later while the light lasts (`off` moves
+0.45 h per hour of dusk from 18:00, -1.2 to +1.5 h). Occupancy stays by the hour (who is home, bedtime, the morning wake). The lamps' pools, lanterns and
+vehicle lights keep reading `uNight` (staggered per lamp, between the sun about 4 degrees up and 1.5 below). Dusk by season (sun 3 degrees up, sampled at the mid-day phases of a game week): 15.7 at midwinter, 17.6 at the start of spring, 19.2-19.7 in early summer, 16.9 in late autumn (sunrise 4.4 to 8.4). Server side was already right: `darknessAt` reads `sunAt`.
+
+**Trees through the year** (`render/seasons.ts`). A vertex-shader patch on the trees' Lambert materials (street trees' crowns and columns in `roads.ts`, park
+broadleaf in `parks.ts`; conifers evergreen; the trunk meshes untouched), driven by `uYear` and a per-tree hash of the instance's world position (no new
+attribute, no CPU work). Leaf amount: buds open over about a quarter of a year (each tree its own start, young leaves a fresher yellow-green), turn from about
+phase 0.46 (each tree yellow, orange or red by hash, in step with its own turn), drop from about 0.56 to bare by 0.8 (the canopy shrinks to 55% of its size
+towards its centre and takes a branch brown, so bare trees stand as twig masses with the trunk showing; the shadow pass has the matching depth material, so
+a bare tree casts a lighter shadow). Snow (`uSnow`, each tree its own threshold) lays white on the canopy's upper faces, on bare and evergreen alike.
+Grass: `uGrass` (greener at spring 0.12, a touch yellower by 0.45, copper-dull at 0.62, grey-brown and 55% desaturated in winter), applied in the ground shader to
+green-dominant non-road pixels, before the weather. Not done: junction roundabout/meadow trees and hedges are baked into the tile meshes (they stay
+green; hedges placed as crowns do follow the year); the buildings' garden trees in the building models; blossom for the cherry (it turns like the rest).
+
+**Seasonal sim effects.**
+- Flu: `fluWave` peaked in early spring (phase 0.15, before there were seasons); it now peaks in mid-winter (`HEALTH.fluPeak` 0.9; `fluPeakOld` for A/B), and a cold
+  day (the day's low from `dayForecast` under 4 C) multiplies everyone's flu chance by up to 1.6 (`WT.fluCold`).
+- Thermal stress (`seasonHealthNow`, memoised per game day): a heatwave is a day's high of 27 C or more, a cold snap a low of -3 C or less, stress 0..1 over the next 6
+  degrees. People of 65 and over lose up to 2 health a day at full stress (clinic demand and frailty follow), and from 70 the old-age death chance is up to
+  x1.6 (`deathChance(age, health, thermal)`; the Math.random draw count is unchanged). How often: heatwave days 0-11% and cold-snap days 0-10% of the days of a
+  seed (seeds 1234, 987654321, 55: under 3% each; 42: 9% and 9%; 7: 11% and 10%; seed 1 none), so some worlds have them and some never do. `SEASONFX=0` in the server's
+  environment turns the whole of this off (flu wave back at its old peak, no stress, no cold boost) for A/B loadtests.
+- Heating and cooling follow the season (W4's `powerDemandMul`, checked over a game week at mid-day phases, seed 1234 / seed 42): demand x1.05 / 1.05 at the start
+  of spring, 1.00 / 1.02 in summer, 1.12 / 1.18 at midwinter; lamp hours (dark share of the day) 9 in summer to 16 in winter. `loadtest/utilities.ts`' own checks are
+  unchanged.
+
+**Season indicator.** The weather chip now begins with the season ("Spring · ☂ 9°C · NW 23 mph") and its tooltip's first line is the season and the date; the clock's
+"day N" carries the same as its tooltip ("Autumn, 14 Sep (a game week is a year)"). The calendar (`seasonDate(phase)`): phase 0 is 1 March, so spring is March to May,
+summer June to August, autumn September to November and winter December to February (a game day is about 52 calendar days). The TV weather map's footer and teletext 140 name
+the season and the date ("Sunny spells. Autumn, 14 Sep."). I tried the season in the clock text itself and took it out: the top bar wraps it to three lines.
+
+**`?season=spring|summer|autumn|winter`** forces the year phase (0.1, 0.38, 0.59, 0.86): the sun's path and dusk, tree and grass looks, the chip's season; the weather
+is read from a clock moved by whole game days to land in that season (a forced winter has winter's temperatures and snow chances, `?weather=` still overrides).
+README Debug row added.
+
+**Measured.**
+- Per-season health, 1 district of 55-90 year olds (`lives`-style, 8 game weeks = 8 years, the same code with `SEASONFX=0` against `1`, seeds 7 and 42; about 1400-1600 citizens;
+  flu cases a day, doctor visits a day, sick days a day): old (flu peak early spring): winter 11-12 flu, 7-9 visits, 3-4 sick days; summer bucket 92-94 flu, 52-53 visits,
+  20-21 sick days. New: winter 129-132 flu, 73-75 visits, 9 sick days; the day-0 spring bucket (winter's wave tail) 130-135 flu, 59 visits, 34-35 sick days; summer 44-46 flu, 8-12
+  visits. The wave's peak is about 40% higher (the cold boost).
+- Deaths over those 8 years: 309 / 331 (old) against 310 / 321 (new), seeds 42 / 7: no measurable change (stress days are rare and add under 2 deaths a year on a few hundred;
+  per-season deaths a day 4-7 both ways, noise). Old-age deaths in winter are not visibly raised: 5.8 and 6.2 a day (new) against 5.1 and 4.9 (old), within the spread.
+  `lives.ts --districts 1 --weeks 8 --ages 55-90` printed the same story (about 300-310 deaths either way, doctor visits 783-850, sick days 1300-1560).
+- `loadtest/death.ts`: 40/40 with `SEASONFX=0`; with the seasons on, "the 3 dead wait at the mortuary" failed (states 1,3,3): the test kills the first three people at home at 09:00,
+  and in a winter flu wave different people are at home, so the hearse needed more than the 1.2 game days it allowed. Its wait is now capped at 3 days (it returns as soon as all three are in): 40/40.
+  `loadtest/motivation.ts`: 29/29. `weather:check`, `weathersim:check`, `history:check`, `npm run typecheck` (with `local:check`) and `npm run build` pass.
+- Frame cost. CPU: `Lighting.update` adds a few multiplies (`grassFor`, uniform writes) and the dusk bisection only when the phase moved 0.002 (14 `sunAt` calls, a few microseconds
+  a few times a second): not measurable. GPU: tree vertex shaders gain a hash and some mixes per vertex (a few thousand vertices); the ground fragment shader gains one
+  branch (green-dominance test, a multiply) on land; windows gain two `min`/`clamp` per pane. Headless Chromium on SwiftShader draws about 1 frame a second at this scene (the
+  rasteriser, not the shader changes), so the A/B is not measurable here; check with Shift+M on a real GPU.
+
+**Screenshots** (`?name=s&season=...&weather=clear&hour=14&at=-6,-4&dist=15&yaw=200&pitch=32`, 1280x720, scale 1): `spring`: lawns a fresher green, street trees opening, some still
+yellow-green; `summer`: full green crowns with a copper beech and pink cherries; `autumn` (0.59): grass duller and warmer, street trees yellow, orange and red tree by tree, some already thin;
+`winter`: grass grey-green, trees bare twig masses with the trunk showing; with `weather=snow` the ground and roofs white and the bare crowns capped with white. Dusk: `hour=17`: winter is fully
+dark, lamps lit and windows glowing in the early evening; summer is full daylight; `hour=20` summer is at dusk with the lamps coming on and `hour=22` is night.
+`hour=17` winter against summer is the clearest pair.

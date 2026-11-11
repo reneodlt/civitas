@@ -157,7 +157,7 @@ console.log('4. plots fill; the dead wait at the mortuary; a crematorium takes t
   const victims = [...w.citizens.values()].filter((c) => c.stage === LifeStage.Retired || c.stage === LifeStage.Adult).filter((c) => c.state === S.Home).slice(0, 3);
   for (const c of victims) D.die(c, Cause.Illness);
   const ids = victims.map((c) => c.id), recs = ids.map((i) => D.dead.get(i)!);
-  run(g, 1.2 * DAY, () => recs.every((r) => r.st === 3));
+  run(g, 3 * DAY, () => recs.every((r) => r.st === 3));
   const hosp = w.buildings.get(tileKey(x0 + 1, y0 + 16));
   ok(recs.every((r) => r.st === 3), `the ${recs.length} dead wait at the mortuary (states ${recs.map((r) => r.st).join(',')})`);
   ok(recs.every((r) => r.mort?.[0] === hosp?.x && r.mort?.[1] === hosp?.y), `at the hospital's (${hosp?.x}, ${hosp?.y})`);

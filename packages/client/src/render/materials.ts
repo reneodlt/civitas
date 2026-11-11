@@ -1,4 +1,4 @@
-import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping, Vector2, Color } from 'three';
+import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping, Vector2, Vector4, Color } from 'three';
 import { ROAD_CLASS_DEFS } from '@msimcity/shared';
 
 /** Side of the data overlay's map (render/overlayMap.ts): one texel per tile, wrapped, so the streamed window (well under this) never needs re-centring. */
@@ -43,6 +43,13 @@ export const lampTexture = (() => {
 export const sceneUniforms = {
   uNight: { value: 0 },
   uHour: { value: 12 },
+  /** the sun's height now (sine of its elevation, shared sunAt) and the hour the evening darkness falls (the sun 3 degrees up, set by the season): windows' glass and their evening schedules follow the year (docs/weather.md W5) */
+  uElev: { value: 0 },
+  uDusk: { value: 18 },
+  /** the year phase 0..1 (shared seasonOf, or ?season=): trees leaf, turn and drop by it (render/seasons.ts) */
+  uYear: { value: 0.1 },
+  /** a multiplier on grass by the season (greener spring, yellower late summer, duller winter): xyz the colour, w the grey blend */
+  uGrass: { value: new Vector4(1, 1, 1, 0) },
   uTime: { value: 0 },
   /** 1 while the congestion overlay is showing */
   uHeat: { value: 0 },
@@ -97,8 +104,7 @@ float mscFlutter(float seed, float t) {
  * blue hour), so the glass reflects what the sky is doing without a new uniform. Keep the two in step.
  */
 const SKY = /* glsl */ `
-vec3 mscSky(float hour) {
-  float el = sin(hour / 24.0 * 6.2831853 - 1.5707963);
+vec3 mscSky(float el) {
   float dayK = smoothstep(-0.22, 0.16, el);
   float duskK = exp(-(el / 0.2) * (el / 0.2)) * 0.8;
   float blueK = exp(-((el + 0.15) / 0.09) * ((el + 0.15) / 0.09));
@@ -113,6 +119,7 @@ attribute float aTop;
 attribute vec4 aFac;
 attribute vec4 aCell;
 uniform float uHour;
+uniform float uElev;
 varying float vWin;
 varying float vTop;
 varying vec4 vFac;
@@ -132,6 +139,7 @@ float mscPowAt(vec2 tile) { return uPow > 0.5 ? texture2D(uPowMap, (mod(tile, ${
 const FRAG_PARS = /* glsl */ `
 uniform float uNight;
 uniform float uHour;
+uniform float uDusk;
 uniform float uTime;
 uniform float uFarWin;
 uniform float uWet;
@@ -206,6 +214,11 @@ vec3 mscGlow(float cls, float k, float h2, float h4, out float lamp) {
   }
   return glow;
 }
+// The evening follows the sun (docs/weather.md W5): lights come on at the dusk of the season (the sun 3 degrees up) rather than at a clock
+// hour, so in winter the early dark finds homes lit from about 16:00 and in summer they wait for 20:15; people stay up a little later
+// while the light lasts. Occupancy (who is home, who has gone to bed) stays by the hour.
+float mscOnAt(float on) { return min(on, uDusk - 0.5 + (on - 16.0) * 0.6); }
+float mscOffAt(float off) { return off < 39.0 ? off + clamp((uDusk - 18.0) * 0.45, -1.2, 1.5) : off; }
 // The share of a class's panes lit at hour t (12..36) in a building of personality bld, for the far windows: the
 // expectation of the per-pane schedule in WINDOWS (darkness threshold, on, off or all night, early start, vacancy,
 // the odd blinker). Keep the numbers in step with it.
@@ -219,6 +232,7 @@ float mscLitShare(float cls, float t, float bld) {
   else                { onA = 16.2; onB = 2.0; offA = 22.8; offB = 2.2; offP = 1.0; alln = 0.05; wA = 34.0; wB = 2.0; mornP = 0.04; vac = 0.12; }
   offA += (bld - 0.5) * 1.5;
   wA += (bld - 0.5) * 1.0;
+  onA = mscOnAt(onA); offA = mscOffAt(offA);
   float eve = clamp((t - onA) / onB, 0.0, 1.0) * (alln + (1.0 - alln) * (1.0 - pow(clamp((t - offA) / offB, 0.0, 1.0), 1.0 / offP)));
   float morn = clamp((t - wA) / wB, 0.0, 1.0) * mornP;
   float dark = clamp((uNight - 0.04 - 0.4 * bld) / 0.55, 0.0, 1.0);
@@ -503,6 +517,7 @@ if (vWin > 8.5) {
         else                { on = 16.2 + 2.0 * h5; off = 22.8 + 2.2 * h2;           if (h3 < 0.05) off = 40.0; wake = 34.0 + 2.0 * h4; mornP = 0.04; vac = 0.12; coolP = 0.25; } // venues: lit for the evening shows, dark after the late one
         off += (bld - 0.5) * 1.5;
         wake += (bld - 0.5) * 1.0;
+        on = mscOnAt(on); off = mscOffAt(off);
         float onThr = clamp(0.05 + 0.55 * h1 + 0.4 * bld, 0.03, 0.98);
         float dark = smoothstep(onThr - 0.05, onThr + 0.03, uNight);
         float eve = smoothstep(on - 0.15, on + 0.15, t) * (1.0 - smoothstep(off - 0.2, off + 0.2, t));
@@ -609,7 +624,7 @@ export function buildingMaterial() {
     Object.assign(shader.uniforms, sceneUniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>' + VERT_PARS)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n vWin = aWin; vTop = aTop; vFac = aFac; vCell = aCell; vLocal = position; vLocalN = normal; vSky = mscSky(uHour);')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n vWin = aWin; vTop = aTop; vFac = aFac; vCell = aCell; vLocal = position; vLocalN = normal; vSky = mscSky(uElev);')
       .replace('#include <project_vertex>', `#include <project_vertex>
 {
   vec4 o = vec4(0.0, 0.0, 0.0, 1.0);
@@ -671,6 +686,7 @@ uniform float uUnder;
 uniform float uWet;
 uniform float uSnow;
 uniform float uCloud;
+uniform vec4 uGrass;
 uniform vec2 uWindOff;
 uniform vec3 uSkyCol;
 uniform sampler2D uLampMap;
@@ -704,6 +720,16 @@ vec3 mscLamp(vec2 tile, vec2 p) {
  * thinner on roads, never on water (blue-dominant tiles). Land and roads only; the underground view fades it.
  */
 const WX_GROUND = /* glsl */ `
+{
+  // the year's hue on grass (green-dominant, not road): greener in spring, yellower late in summer, duller in winter (render/seasons.ts)
+  vec3 c = diffuseColor.rgb;
+  float gk = smoothstep(0.02, 0.07, c.g - max(c.r * 1.02, c.b * 1.1)) * (1.0 - step(16.0, vRoad));
+  if (gk > 0.0) {
+    vec3 g = c * uGrass.xyz;
+    g = mix(g, vec3(dot(g, vec3(0.299, 0.587, 0.114))) * vec3(1.02, 0.97, 0.88), uGrass.w);
+    diffuseColor.rgb = mix(c, g, gk);
+  }
+}
 if (uCloud > 0.001) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), 0.4 * uCloud);
 if (uWet > 0.001 || uSnow > 0.001) {
   float isRoad = step(16.0, vRoad);

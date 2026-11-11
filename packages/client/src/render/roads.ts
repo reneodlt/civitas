@@ -15,6 +15,7 @@ import { Geo, buildTile, buildRing, buildBigRing, surfaceY, ringSurfaceY, bigRin
 import { junctionLights } from './signals';
 import { lampTexture, OVL_SIZE, groundMaterial, lanternMaterial, sceneUniforms } from './materials';
 import { Kit } from './kit';
+import { leafMaterial, leafDepthMaterial } from './seasons';
 
 /**
  * The streets near the camera as geometry (render/roadGeo.ts) and their furniture: lamp columns of three designs
@@ -209,13 +210,18 @@ export class RoadLayer {
     const furnMat = new MeshLambertMaterial({ vertexColors: true, flatShading: true });
     const lens = lanternMaterial(), beacon = beaconMaterial();
     const tree = treeGeometries(), small = smallGeometries();
+    const CROWN_LEAF = { mat: leafMaterial({ crownY: 0.2, above: -1 }), depth: leafDepthMaterial({ crownY: 0.2, above: -1 }) };
+    const COLUMN_LEAF = { mat: leafMaterial({ crownY: 0.25, above: -1 }), depth: leafDepthMaterial({ crownY: 0.25, above: -1 }) };
     const geos = [postGeometry(0), postGeometry(1), postGeometry(2), lensGeometry(0), lensGeometry(1), lensGeometry(2),
       tree.trunk, tree.crown, tree.column, small.bollard, small.bin, small.sign, small.beacon, small.globe, small.bench];
     const caps = [6000, 6000, 6000, 6000, 6000, 6000, 12000, 12000, 12000, 6000, 3000, 3000, 2000, 2000, 2000];
     this.meshes = geos.map((g, i) => {
       const lamp = i >= F.Lens0 && i <= F.Lens2, glob = i === F.Globe;
       if (lamp || glob) g.setAttribute('aLamp', new InstancedBufferAttribute(new Float32Array(caps[i] * 4), 4).setUsage(DynamicDrawUsage));
-      const m = new InstancedMesh(g, lamp ? lens : glob ? beacon : furnMat, caps[i]);
+      // crowns and columns go through the year (render/seasons.ts); the trunk below keeps the plain material
+      const leaf = i === F.Crown ? CROWN_LEAF : i === F.Column ? COLUMN_LEAF : null;
+      const m = new InstancedMesh(g, leaf ? leaf.mat : lamp ? lens : glob ? beacon : furnMat, caps[i]);
+      if (leaf?.depth) m.customDepthMaterial = leaf.depth;
       m.count = 0; m.frustumCulled = false;
       m.castShadow = i <= F.Post2 || i === F.Trunk || i === F.Crown || i === F.Column || i === F.Beacon || i === F.Bench;
       m.receiveShadow = i === F.Crown || i === F.Column;

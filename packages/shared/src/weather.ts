@@ -361,3 +361,20 @@ export function sunAt(phase: number, hour: number): { x: number; y: number; z: n
   const up = Math.sin(d) * Math.sin(LAT) + Math.cos(d) * Math.cos(H) * Math.cos(LAT);
   return { x: east, y: up, z: -north, elev: up };
 }
+
+// ---------------------------------------------------------------- the calendar (W5)
+
+const MONTHS = ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb'];
+const MONTH_LEN = [31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31, 28]; // a year from 1 March, 365 days
+/**
+ * The season and the date in the year for a year phase (seasonOf(tick).phase): phase 0 is 1 March, so spring is March to May, summer
+ * June to August, autumn September to November and winter December to February, as the temperature model has it (warmest at 0.33,
+ * coldest at 0.83). A game week is the whole year, so the date moves about 52 days a game day.
+ */
+export function seasonDate(phase: number): { name: SeasonName; label: string; month: string; day: number; date: string } {
+  const p = phase - Math.floor(phase);
+  let d = Math.min(364, Math.floor(p * 365)), m = 0;
+  while (d >= MONTH_LEN[m]) { d -= MONTH_LEN[m]; m++; }
+  const name: SeasonName = p < 0.25 ? 'spring' : p < 0.5 ? 'summer' : p < 0.75 ? 'autumn' : 'winter';
+  return { name, label: name[0].toUpperCase() + name.slice(1), month: MONTHS[m], day: d + 1, date: `${d + 1} ${MONTHS[m]}` };
+}

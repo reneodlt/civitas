@@ -1,4 +1,4 @@
-import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod, SKILLS, EDU, POLICY, overQualified } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod, SKILLS, EDU, POLICY, overQualified, WEATHER_TUNING } from '@msimcity/shared';
 import type { Citizen } from '../world';
 
 /**
@@ -60,6 +60,8 @@ export const HEALTH = {
   fluCost: 2.5, injuryCost: 1.5, chronicCost: 0.3,
   /** flu: base chance per day plus a seasonal wave once a game year; household members with flu multiply it */
   fluBase: 0.002, fluSeason: 0.045, fluHousehold: 4, fluDaysMin: 2, fluDaysMax: 5,
+  /** the year phase (shared seasonOf) the flu wave peaks at: mid-winter (W5); it was 0.15, early spring, before seasons (SEASONFX=0 keeps that) */
+  fluPeak: 0.9, fluPeakOld: 0.15,
   /** injury: chance per working day in a factory / on a building site */
   injuryIndustrial: 0.012, injuryYard: 0.009, injuryDaysMin: 3, injuryDaysMax: 8,
   /** chronic illness: chance per day per 5 years over 50 */
@@ -84,17 +86,18 @@ export function stageFor(id: number, age: number): number {
 export const seededAge = (id: number, lo: number, hi: number) => lo + (hi - lo) * (hash2(id, 211) + hash2(id, 213)) / 2;
 
 /** Seasonal flu wave, 0..1, once a game year; some years are worse than others. */
-export function fluWave(day: number): number {
+export function fluWave(day: number, peak: number = HEALTH.fluPeak): number {
   const years = day / LIFE.daysPerYear, year = Math.floor(years), phase = years - year;
   const severity = 0.5 + hash2(year, 977);
-  const w = Math.max(0, Math.cos(2 * Math.PI * (phase - 0.15)));
+  const w = Math.max(0, Math.cos(2 * Math.PI * (phase - peak)));
   return Math.min(1, severity * w ** 6);
 }
 
 /** Yearly chance of dying of old age, as a chance per game day; plus poor health. */
-export function deathChance(age: number, health: number): number {
+export function deathChance(age: number, health: number, thermal = 0): number {
   let p = 0;
-  if (age >= HEALTH.oldAgeFrom - 10) p += Math.min(0.9, HEALTH.oldAgeQ * HEALTH.oldAgeGrowth ** (age - HEALTH.oldAgeFrom)) / LIFE.daysPerYear;
+  // `thermal` (0..1, W5): a heatwave or cold snap today raises the old-age part for the elderly
+  if (age >= HEALTH.oldAgeFrom - 10) p += Math.min(0.9, HEALTH.oldAgeQ * HEALTH.oldAgeGrowth ** (age - HEALTH.oldAgeFrom)) / LIFE.daysPerYear * (thermal > 0 && age >= WEATHER_TUNING.thermalAge ? 1 + WEATHER_TUNING.thermalDeath * thermal : 1);
   if (health < HEALTH.poorHealthBelow) p += HEALTH.poorHealthPerDay;
   else if (health < HEALTH.frailBelow) p += HEALTH.frailPerDay;
   return p;
