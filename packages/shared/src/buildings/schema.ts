@@ -179,6 +179,8 @@ export interface Attributes {
   workRate?: number;
   /** leisure venues: how much harder an event night pulls people in (1 = the usual premiere or match night) */
   eventSize?: number;
+  /** leisure venues: how much of a visit is out of doors, 0-1 (default 1 for a park, 0 otherwise): the weather's pull on it (docs/weather.md W4) */
+  outdoor?: number;
   // gateways (shared/src/gateways.ts): where newcomers arrive and leavers go, read by the server's sim/gateways.ts
   /** what kind of way in and out of town this is: 'motorway' | 'rail' | 'bus' | 'air' | 'sea' (sea: later, needs water) */
   gateway?: string;

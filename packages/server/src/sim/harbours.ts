@@ -6,6 +6,7 @@ import {
 } from '@msimcity/shared';
 import { tkey, type Building, type World } from '../world';
 import type { Simulation } from './simulation';
+import { weatherNow, type WeatherHold } from './weatherfx';
 
 /**
  * The server's harbours (docs/boats.md sections 2, 6.3-6.5): the harbour list with its lanes, sent to every client as
@@ -91,6 +92,13 @@ export class Harbours {
   private exportPts: [number, number][] = [];
   private last = -1;
   private evCache = new Map<string, BoatEvent[]>();
+  /** boat events held by storm or fog (docs/weather.md W4): trawlers stay in, ships wait off; they happen, late, when it lifts */
+  private heldEvents: BoatEvent[] = [];
+  private holding: 'storm' | 'fog' | null = null;
+  /** set by game.ts: shipping held or resumed, for the news (sim/news.ts weather) */
+  onHold: ((e: WeatherHold) => void) | null = null;
+  /** counters since start: holds, events held (each happens late when the hold lifts) */
+  weatherStats = { holds: 0, held: 0 };
 
   constructor(private w: World, private sim: Simulation | null = null) {
     const sample = makeTerrainSampler(w.seed);
@@ -136,11 +144,22 @@ export class Harbours {
     const from = this.last;
     this.last = now;
     if (!this.list.length || from < 0 || now <= from || now - from > TICKS_PER_DAY) return;
+    const hold = weatherNow(this.w).hold;
     for (let d = Math.floor(from / TICKS_PER_DAY) - 1; d <= day; d++) {
       const evs = this.events(d);
       let lo = 0, hi = evs.length;
       while (lo < hi) { const m = (lo + hi) >> 1; if (evs[m].t <= from) lo = m + 1; else hi = m; }
-      for (let i = lo; i < evs.length && evs[i].t <= now; i++) this.event(evs[i]);
+      for (let i = lo; i < evs.length && evs[i].t <= now; i++) {
+        if (hold && this.heldEvents.length < 2000) { this.heldEvents.push(evs[i]); this.weatherStats.held++; } else this.event(evs[i]);
+      }
+    }
+    if (!hold && this.heldEvents.length) { const late = this.heldEvents; this.heldEvents = []; for (const e of late) this.event(e); }
+    if (hold !== this.holding) {
+      const was = this.holding;
+      this.holding = hold;
+      const y = [...this.yards.values()].find((v) => v.dto.active);
+      if (hold) this.weatherStats.holds++;
+      if (y) this.onHold?.({ what: 'shipping', reason: hold ?? was!, lifted: !hold, x: y.b.x, y: y.b.y, owner: y.dto.owner ?? undefined });
     }
     const hour = (now % TICKS_PER_DAY) / TICKS_PER_HOUR;
     if (this.sim && this.w.tick % FISH_EVERY === 0 && hour >= 5 && hour < 20) for (const y of this.yards.values()) if (y.stock >= FISH_LORRY && y.dto.active) this.sellFish(y);

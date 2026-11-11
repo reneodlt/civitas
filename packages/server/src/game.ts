@@ -138,6 +138,7 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   // the news, the dead waiting for burial space badge their mortuary
   fires.onHarm = (e) => sim.death.harm(e);
   sim.death.onStory = (e) => news.death(e);
+  airports.onHold = ferry.onHold = harbours.onHold = (e) => news.weather(e); // storms and fog hold flights and boats (docs/weather.md W4)
   sim.death.look = (x, y) => issues.fireChanged(x, y);
   issues.waiting = (x, y) => sim.death.noSpaceAt(x, y);
   sim.death.sandbox = cfg.sandbox;

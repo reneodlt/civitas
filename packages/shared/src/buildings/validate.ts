@@ -47,6 +47,7 @@ function checkLeisure(k: KindDef, a: Attributes, where: string, errs: string[]) 
   for (const f of ['dayAppeal', 'eveningAppeal', 'retireeAppeal', 'childAppeal', 'upgradeVisits', 'trees', 'benches', 'eventSize'] as const) {
     if (a[f] !== undefined && !(isNum(a[f]) && (a[f] as number) >= 0)) bad(`${f} must be a non-negative number`);
   }
+  if (a.outdoor !== undefined && !(isNum(a.outdoor) && a.outdoor >= 0 && a.outdoor <= 1)) bad('outdoor must be a share 0-1');
 }
 const INT16 = 32767;
 

@@ -484,3 +484,72 @@ export const PUBLIC_ROAD_TUNING = {
   reachMax: 20000,
 };
 export type PublicRoadTuning = typeof PUBLIC_ROAD_TUNING;
+
+/**
+ * What the weather does to the simulation (docs/weather.md W4, shared/src/weatherfx.ts). Every effect reads
+ * `weatherFor(seed, tick)` (W1's `weatherAt`, or a forced condition in a test) and is 1 / 0 in mild dry weather, so a
+ * clear day plays as before. Numbers are multipliers unless named otherwise; "wet" is rain intensity 0-1 (rain or snow).
+ */
+export const WEATHER_TUNING = {
+  // ---- mode choice: the walk's perceived cost (transit and taxi choice weigh it against the bus, the taxi and the car)
+  /** the walk costs (1 + this × rain) in rain ... */
+  walkRain: 1.2,
+  /** ... and (1 + this × intensity) in falling snow, plus this × lying snow */
+  walkSnow: 1.5, walkSnowCover: 0.6,
+  /** ... plus this per degree below coldFrom (C), at most coldMax */
+  walkCold: 0.04, coldFrom: 6, coldMax: 0.5,
+  /**
+   * in the wet a car owner may drive a trip of driveMinWet tiles or more (DRIVE_MIN_TILES otherwise): the share who do is
+   * wetDrive × (walk cost − 1), by a personal hash (some always take the car when it rains, some never)
+   */
+  driveMinWet: 2, wetDrive: 0.5,
+
+  // ---- road speed and collisions (sim/traffic.ts leg and horizon)
+  /** road pace at full rain (scaled by intensity, from 0 at light rain 0.15) */
+  speedRain: 0.9,
+  /** road pace on lying snow (full cover; scaled by cover) where the road is not gritted (no gritters yet: W6) */
+  speedSnow: 0.75,
+  /** road pace in thick fog (scaled by fog over 0.3) */
+  speedFog: 0.9,
+  /** collision rate (a hook: no road collisions are simulated yet, docs/incidents.md): × (1 + this × factor) */
+  crashRain: 0.5, crashSnow: 1.5, crashFog: 0.8,
+
+  // ---- leisure (Simulation.pickLeisure): a place's outdoor share (LeisureSpec.outdoor) takes the outdoor factor
+  /** outdoor appeal × (1 − this × rain) ... */
+  outdoorRain: 0.75,
+  /** ... × (1 − this per degree below outdoorCold C, at most 0.6) ... */
+  outdoorCold: 0.05, outdoorColdFrom: 10,
+  /** ... × (1 − this) in the dark (the sun below the horizon) ... */
+  outdoorDark: 0.35,
+  /** ... and × (1 + this) on a warm dry day (warmFrom C or more, little cloud, no rain) */
+  outdoorWarm: 0.35, warmFrom: 18,
+  /** indoor appeal × (1 + this × rain) in the evening (wet nights fill cinemas, theatres and halls) */
+  indoorWetNight: 0.4,
+
+  // ---- utilities (sim/utilities.ts solve)
+  /** power demand + this share per degree below heatFrom C (electric heating; at most heatMax) */
+  heatPerDeg: 0.012, heatFrom: 14, heatMax: 0.3,
+  /** power demand + this share per degree above coolFrom C (fans and air conditioning; at most coolMax) */
+  coolPerDeg: 0.025, coolFrom: 22, coolMax: 0.3,
+  /** street lighting: units an hour per road tile a node reaches, in full dark (dusk and dawn shade it; thick fog lights it by day) */
+  lampUnits: 0.02,
+  /** wind turbines: output × min(windMax, wind speed / the world's mean wind (windRef tiles per game hour without one)); feathered (0) when gusts pass windCutout */
+  windRef: 10, windMax: 1.5, windCutout: 40,
+  /** overhead-line faults × this in a storm (buried cable and nodes: half of it); W6 does the big storms */
+  faultStorm: 3,
+
+  // ---- mood (life.ts happinessParts)
+  /** a sunny warm day: + up to this many points (sun up, cloud under 0.4, dry, moodWarmFrom C or more; the full lift 4 degrees warmer) */
+  moodSun: 3, moodWarmFrom: 15,
+  /** a grey spell: − up to this many points when more than greyFrom of the last greyHours game hours were grey (cloud over 0.8, rain over 0.15 or fog over 0.5) */
+  moodGrey: 3, greyFrom: 0.75, greyHours: 72,
+
+  // ---- transport (sim/airports.ts, sim/ferry.ts, sim/harbours.ts)
+  /** flights and boats are held while fog is over this or a storm blows; a landing held longer than holdMaxHours is diverted */
+  holdFog: 0.6, holdMaxHours: 4,
+
+  // ---- construction (Simulation.workSite)
+  /** site work × this in frost (at or below 0 C, or lying snow over 0.3) and × heavyRainBuild in rain over heavyRain */
+  frostBuild: 0.7, heavyRainBuild: 0.8, heavyRain: 0.75,
+};
+export type WeatherTuning = typeof WEATHER_TUNING;

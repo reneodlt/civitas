@@ -3,6 +3,8 @@ import {
   type Airport, type AirportLink, type AirfieldEnv, type AirportInfo, type Flight, type Placed,
 } from '@msimcity/shared';
 import type { World } from '../world';
+import { weatherNow, type WeatherHold } from './weatherfx';
+import { WEATHER_TUNING, TICKS_PER_HOUR } from '@msimcity/shared';
 
 /** One plane landing at one of the city's airports, with the passengers it brings. */
 export interface Arrival { airport: Airport; terminal: Placed; owner: string | null; flight: Flight; passengers: number; departing: number }
@@ -22,6 +24,13 @@ export class Airports {
    */
   onArrival: ((a: Arrival) => void) | null = null;
   private last = -1;
+  /** landings held by storm or fog (docs/weather.md W4): they touch down when it lifts, or divert after WEATHER_TUNING.holdMaxHours */
+  private held: { link: AirportLink; f: Flight; at: number }[] = [];
+  private holding: 'storm' | 'fog' | null = null;
+  /** set by game.ts: a hold starting or lifting, for the news (sim/news.ts weather) */
+  onHold: ((e: WeatherHold) => void) | null = null;
+  /** counters since start: landings held, landed late, diverted */
+  weatherStats = { held: 0, late: 0, diverted: 0, holds: 0 };
   private stats = new Map<number, { day: number; fees: number; passengers: number }>();
   readonly env: AirfieldEnv;
 
@@ -50,13 +59,36 @@ export class Airports {
     const from = this.last < 0 ? now : this.last;
     this.last = now;
     if (now <= from || now - from > TICKS_PER_DAY) return;
+    const hold = this.links.some((l) => l.airport) || this.held.length ? weatherNow(this.w).hold : null;
     for (const link of this.links) {
       const ap = link.airport;
       if (!ap) continue;
       for (let day = Math.floor(from / TICKS_PER_DAY); day <= Math.floor(now / TICKS_PER_DAY); day++) {
-        for (const f of timetable(ap, day)) if (f.tTouchdown > from && f.tTouchdown <= now) this.land(link, f);
+        for (const f of timetable(ap, day)) if (f.tTouchdown > from && f.tTouchdown <= now) {
+          if (hold) { this.held.push({ link, f, at: this.w.tick }); this.weatherStats.held++; } else this.land(link, f);
+        }
       }
     }
+    this.weatherHold(hold);
+  }
+  /** Storm and fog (docs/weather.md W4): held landings divert after holdMaxHours; when it lifts the rest land, late. */
+  private weatherHold(hold: 'storm' | 'fog' | null) {
+    const maxAge = WEATHER_TUNING.holdMaxHours * TICKS_PER_HOUR;
+    if (this.held.length) {
+      const keep: typeof this.held = [];
+      for (const h of this.held) {
+        if (this.w.tick - h.at > maxAge) this.weatherStats.diverted++;
+        else if (!hold) { this.land(h.link, h.f); this.weatherStats.late++; } else keep.push(h);
+      }
+      this.held = keep;
+    }
+    if (hold === this.holding) return;
+    const was = this.holding;
+    this.holding = hold;
+    const t = this.links.find((l) => l.airport)?.terminal;
+    if (!t) return;
+    if (hold) this.weatherStats.holds++;
+    this.onHold?.({ what: 'flights', reason: hold ?? was!, lifted: !hold, x: t.doorX, y: t.doorY, owner: this.w.parcelAt(t.doorX, t.doorY)?.owner });
   }
 
   /** Passengers a flight brings into the city (the gateways card will spawn them). */

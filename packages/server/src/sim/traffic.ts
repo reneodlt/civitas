@@ -7,8 +7,10 @@ import {
   groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
   slipJunction, groupTiming, groupMain, MINI_AUX, type JunctionGroup,
   StreetRule, ZONE20_SPEED, ZONE20_COST,
+  ROAD_WEATHER,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
+import { weatherNow } from './weatherfx';
 import { env } from '../env';
 
 // a test server may override TRAFFIC_TUNING for its whole run, as ab.ts --set does offline: TRAFFIC=follow=1,lookAhead=1
@@ -2058,7 +2060,7 @@ export class Traffic {
   private horizon(m: Mover, v: number, dir: number, heavy: boolean): number {
     const dec = TT.brake, n = m.path.length / 2, path = m.path, bike = isBike(m);
     const reach = Math.min(HORIZON_MAX, Math.ceil((v * v) / (2 * dec) + v * TT.headway + 1.5));
-    const pace = DRIVE_SPEED * m.speedMul * (heavy ? 0.8 : 1);
+    const pace = DRIVE_SPEED * m.speedMul * (heavy ? 0.8 : 1) * this.weatherPace(m.path[m.pi * 2], m.path[m.pi * 2 + 1]);
     let cap = Infinity, prev = dir, judged = false;
     for (let j = m.pi; j < n && j - m.pi <= reach; j++) {
       const x = path[j * 2], y = path[j * 2 + 1];
@@ -2178,6 +2180,15 @@ export class Traffic {
     }
     return r;
   }
+  /**
+   * The weather's road pace on tile (x, y) (docs/weather.md W4, WEATHER_TUNING): ×0.9 in heavy rain, ×0.75 on lying snow
+   * where the road is not gritted (ROAD_WEATHER.gritted: no gritters yet, W6), ×0.9 in thick fog; 1 on a dry day.
+   */
+  private weatherPace(x: number, y: number): number {
+    const wx = weatherNow(this.w);
+    if (wx.road === 1) return 1;
+    return wx.road === wx.roadGritted || !ROAD_WEATHER.gritted(x, y) ? wx.road : wx.roadGritted;
+  }
   /** What the last leg could not use because it crossed an edge with more than 0.3 of its move left (only a fast car's). */
   private carry = 0;
   private leg(m: Mover, cap: number, again: boolean): 'moving' | 'arrived' | 'stuck' {
@@ -2200,6 +2211,7 @@ export class Traffic {
       if (m.s2 && !last && edgeLanes(this.classAux(bx, by), this.classAux(m.path[(m.pi + 1) * 2], m.path[(m.pi + 1) * 2 + 1]), nextDir) < 2) m.s2 = 0;
     }
     if (this.kerbAt(ax, ay)) base *= 0.6;
+    base *= this.weatherPace(bx, by); // rain, lying snow and fog (docs/weather.md W4)
     if (cap < base) base = cap; // a second leg has only what the first left
     // a 20 zone (R5): every vehicle at ZONE20_SPEED on its tiles
     if (this.w.streetAny & StreetRule.Zone20 && this.w.streetAt(m.prog < 0.5 ? ax : bx, m.prog < 0.5 ? ay : by) & StreetRule.Zone20) base *= ZONE20_SPEED;

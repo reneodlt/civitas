@@ -2,7 +2,7 @@ import {
   TICKS_PER_DAY, TICKS_PER_HOUR, Zone, FleetKind, MOTORWAY_KIND, KIND_NAMES,
   capacityOf, tileKey, hash2, isRoad, hasFeature, techFor, faultAdvice, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
   UTIL, UTIL_WEATHER, UTIL_AVAIL_OF, Avail, UtilRole, UtilState, UTIL_STATE_WORDS, UTIL_ROLE_OF, UTIL_SUPPLY_OF, UTIL_NODE_CAP_OF, UTIL_IMPORT_OF, UTIL_FUEL_OF,
-  UtilityField, Unions, utilityReach, solveNetwork, powerDemand, availability, linkCost, chunkUtilSig, utilKey, isMotorwayAt,
+  UtilityField, Unions, utilityReach, solveNetwork, powerDemand, availability, weatherFor, powerDemandMul, darknessAt, WEATHER_TUNING, linkCost, chunkUtilSig, utilKey, isMotorwayAt,
   type HintId, type UtilEnv, type UtilNode, type SolveNode, type UtilLinkDTO, type LinkMode, type UtilitiesSave, type FaultSave, type UtilityInfo, type NetworkInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, Player, World } from '../world';
@@ -90,6 +90,8 @@ export class Utilities implements FleetService {
   private heldLast = new Map<string, number>();
   /** the last hour solved (world hour index) */
   hour = -1;
+  /** the weather at the last solve (docs/weather.md W4): the demand multiplier for heating and cooling, street lighting's units */
+  weatherHour = { demandMul: 1, lighting: 0 };
   /** net.ts sends `utilState` / `utilLinks` when these are set */
   stateChanged = false;
   linksChanged = false;
@@ -181,18 +183,22 @@ export class Utilities implements FleetService {
     // each node's patch: demand, workplaces' share, never-cut services
     const demand = new Float64Array(N), work = new Float64Array(N), never = new Uint8Array(N);
     this.draws.clear();
+    // the weather (docs/weather.md W4): heating and cooling on every building's demand, street lighting on each node's streets
+    const wx = weatherFor(w.seed, tick), wmul = powerDemandMul(wx), lamps = WEATHER_TUNING.lampUnits * darknessAt(wx, tick);
+    this.weatherHour = { demandMul: wmul, lighting: 0 };
     if (N) for (const b of w.buildings.values()) {
       if (b.level <= 0 || UTIL_ROLE_OF[b.id]) continue;
       const owner = w.parcelAt(b.x, b.y)?.owner;
       if (!owner) continue;
       const n = this.servingOf(b, owner);
       if (n < 0) continue;
-      const units = powerDemand(b.zone, b.level, b.occupants + (b.lodgers ?? 0), capacityOf(b.id, b.level), hour);
+      const units = powerDemand(b.zone, b.level, b.occupants + (b.lodgers ?? 0), capacityOf(b.id, b.level), hour) * wmul;
       demand[n] += units;
       if (b.zone !== Zone.Residential) work[n] += units;
       if (b.zone === Zone.Hospital || b.zone === Zone.Police) never[n] = 1;
       this.draws.set(b, { node: n, units });
     }
+    if (lamps > 0) for (let i = 0; i < N; i++) { const u = lamps * (this.field.served[i] ?? 0); demand[i] += u; this.weatherHour.lighting += u; }
     // networks: nodes joined by touching reach and by links, plants joined to the node whose reach takes in their door
     const plants: Building[] = [];
     for (const b of w.builtOf(Zone.Hub)) if (UTIL_ROLE_OF[b.id] === UtilRole.Plant && w.parcelAt(b.x, b.y)?.owner) plants.push(b);
@@ -437,12 +443,12 @@ export class Utilities implements FleetService {
     const able = (o: string) => { let v = can.get(o); if (v === undefined) can.set(o, v = hasFeature(w.players.get(o)?.tech ?? [], 'powerdepot')); return v; };
     for (const n of this.field.nodes) {
       if (n.owner === 'sys' || !able(n.owner) || this.faultOn('node', n.key)) continue;
-      const p = UTIL.nodeFaultPerHour * UTIL_WEATHER.faultMul(n.x, n.y, tick, false);
+      const p = UTIL.nodeFaultPerHour * UTIL_WEATHER.faultMul(n.x, n.y, tick, false, w.seed);
       if (hash2((n.key % 1000003) * 3 + (w.seed % 977), hourIndex * 7 + 11) < p) this.openFault('node', n.key, n.owner, n.x, n.y);
     }
     for (const l of this.links) {
       if (!able(l.owner) || this.faultOn('link', l.id)) continue;
-      const p = UTIL.linkFaultPerTileHour * (l.tiles.length / 2) * UTIL_WEATHER.faultMul(l.a[0], l.a[1], tick, l.mode === 'overhead');
+      const p = UTIL.linkFaultPerTileHour * (l.tiles.length / 2) * UTIL_WEATHER.faultMul(l.a[0], l.a[1], tick, l.mode === 'overhead', w.seed);
       if (hash2(l.id * 131 + (w.seed % 977), hourIndex * 13 + 5) < p) this.openFault('link', l.id, l.owner, l.a[0], l.a[1]);
     }
   }

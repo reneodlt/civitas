@@ -235,9 +235,14 @@ so a first substation can import at once.
   is at work"; a building on its streets says the same under Power. When it is fixed: "Power restored at (x, y)
   after N hours: your repair van fixed it", or "a contractor fixed it" and what a depot would do.
 - **A cut's length is a gameplay number:** depot distance plus traffic.
-- **Storms (hook):** `UTIL_WEATHER.faultMul(x, y, tick)` multiplies the fault rate and `UTIL_WEATHER.windMul(tick)`
-  wind output; both are 1 with no weather. A weather system would raise overhead faults 10× for a few hours and stop
-  turbines at gale force.
+- **Weather (docs/weather.md W4):** `UTIL_WEATHER.faultMul(x, y, tick, overhead, seed)` multiplies the fault rate
+  (×3 for overhead links in a storm, ×2 for nodes and buried cable, 1 otherwise; W6's big storms take it further) and
+  `UTIL_WEATHER.windMul(tick, seed)` wind output (the weather's wind against the world's mean, up to 1.5×, 0 when gusts
+  pass 40 tiles an hour: the turbines feather; `windAt` caps the product at 1). Every building's demand is × a temperature
+  factor (+1.2% a degree under 14 C, at most +30%: electric heating; +2.5% a degree over 22 C, at most +30%: cooling), and
+  each node's streets draw street lighting, 0.02 units an hour per road tile it serves in the dark (`UtilityField.served`;
+  dusk and dawn shade it, thick fog lights it by day). Nobody is billed for the lamps: the network's owner pays for the
+  units. `gasDemandMul` is the heating hook for a gas network.
 
 ### 4.5 The client
 
@@ -355,7 +360,7 @@ blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`
 
 | Hook | Where | For |
 | --- | --- | --- |
-| `UTIL_WEATHER.faultMul`, `windMul` | shared/src/utilities.ts | storms (a weather card) |
+| `UTIL_WEATHER.faultMul`, `windMul` | shared/src/utilities.ts | filled by docs/weather.md W4 (storm faults, wind output); W6 the big storms |
 | `pylonBlightAt(x, y, links)` | shared/src/utilities.ts | land value (bbe84771) |
 | `UtilitiesSave.contracts`, `ContractDTO` | shared/src/utilities.ts | selling to neighbours (U9) |
 | `Utilities.tariff` per owner | server sim/utilities.ts | the tariff slider |

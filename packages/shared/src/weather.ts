@@ -263,6 +263,9 @@ export function climateOf(seed: number): Climate {
   return st.climate;
 }
 
+/** The world's mean wind speed, tiles per game hour (cheap: no rose; `climateOf(seed).meanSpeed` is the same number). */
+export const meanWindOf = (seed: number): number => stateOf(seed).raw.meanSpeed;
+
 let lastSeed = NaN, lastTick = NaN, lastW: Weather | null = null;
 
 /** The weather at a tick, the same on every machine. The returned object is shared by repeat calls: do not mutate it. */

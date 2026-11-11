@@ -83,7 +83,7 @@ export const botanicalGarden: KindDef = {
   blurb: 'A great glasshouse of palms, formal beds, an arboretum and a lake garden over a whole block. The finest park in town, worth a trip from anywhere.',
   howTo: 'A 4×4 block; the gate is right of the middle of the frontage. A small entry charge pays towards the upkeep. Late game: needs Landmarks.',
   tool: { id: 'botanic', key: '', label: 'Botanical garden', color: '#2f7f55' },
-  attrs: { venueType: 'park', openHours: [8, 20], ticket: 2, stay: [1.2, 3], dayAppeal: 1.6, eveningAppeal: 0.2, retireeAppeal: 2.4, childAppeal: 1.6, ...parkAttrs, title: 'botanical garden' },
+  attrs: { venueType: 'park', openHours: [8, 20], ticket: 2, stay: [1.2, 3], dayAppeal: 1.6, eveningAppeal: 0.2, retireeAppeal: 2.4, childAppeal: 1.6, ...parkAttrs, title: 'botanical garden', outdoor: 0.6 },
   cost: 2200, work: 1600, capacity: 0, parking: { surface: 10, underground: 16 },
   levels: [{
     upkeep: 34, attrs: { visitorCapacity: 120, leisureValue: 12, radius: 20 },
@@ -289,7 +289,7 @@ export const leisureCentre: KindDef = {
         ['box', 0.6, 0.3, 0.3, 0.4, 0.02, 0.62, 'boxBlue', true], ['box', 0.64, 0.03, 0.34, 0.4, 0.32, 0.62, 'dark'], ['box', 0.4, 0.08, 0.03, 0.4, 0.22, 0.78, 'white'],
         ...carRow(-0.8, 0.8, 4, 0.18, false, 0.02, 1),
       ] },
-      { name: 'open-air lido with deck chairs, a diving board and a gym block', height: 0.66, ops: [
+      { name: 'open-air lido with deck chairs, a diving board and a gym block', height: 0.66, attrs: { outdoor: 0.8 }, ops: [
         slab(2, 2, 'stone'),
         ['box', 1.3, 0.024, 0.9, -0.2, 0.02, -0.3, 'white'], ['box', 1.2, 0.03, 0.8, -0.2, 0.02, -0.3, 'pond'],
         ...repeat(6, (i): Op => ['box', 1.2, 0.032, 0.006, -0.2, 0.02, -0.65 + i * 0.14, 'white']),
