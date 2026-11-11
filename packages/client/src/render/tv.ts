@@ -1,6 +1,6 @@
 import { CanvasTexture, WebGLRenderTarget, PerspectiveCamera, LinearFilter, SRGBColorSpace, Vector3, type Texture, type WebGLRenderer, type Scene, type Object3D } from 'three';
 import {
-  CIVITAS_CHANNELS, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, leisureAt, eventOn, eventStartAt, isLeisure,
+  CIVITAS_CHANNELS, dayForecast, playerChannel, programmeAt, homeChannel, tvOnAt, watchingLine, GENRE_CODE, hash2, leisureAt, eventOn, eventStartAt, isLeisure,
   isRoad, zoneOf, levelOf, CHUNK_SIZE, RANKS, TRANSIT, TAXI, FOOD, CITIES, WEEKDAY_NAMES, TICKS_PER_DAY, TICKS_PER_HOUR, Zone,
   type TvChannel, type Programme, type Genre, type HeliState, type StoryDTO, type CitizenInfo, type RankDTO, type ServerMsg, type LeisureSpec,
 } from '@msimcity/shared';
@@ -63,12 +63,13 @@ const pad2 = (n: number) => String(Math.floor(n)).padStart(2, '0');
 /** One channel's graphics layer: a canvas, its texture and what is drawn on it now. */
 interface Gfx { canvas: HTMLCanvasElement; g: CanvasRenderingContext2D; tex: CanvasTexture; key: string; draws: number }
 
-/** The forecast for a game day, the same on every set (weather pages and the weather map). */
-export function forecast(day: number, seed = 0) {
-  const sky = ['Sunny spells', 'Cloudy', 'Showers', 'Rain', 'Bright and breezy', 'Fog clearing', 'Thundery showers', 'Drizzle'];
-  const k = Math.floor(hash2(day, 1701) * sky.length);
-  const hi = Math.round(9 + 12 * hash2(day, 1702) + (hash2(day, 1703) - 0.5) * 3);
-  return { sky: sky[k], wet: k === 2 || k === 3 || k === 6 || k === 7, hi, lo: hi - 4 - Math.floor(hash2(day, 1704) * 5), wind: 5 + Math.floor(hash2(day, 1705) * 25), local: (i: number) => hi - 2 + Math.floor(hash2(day * 7 + i, 1706 + seed) * 5) };
+/**
+ * The forecast for a game day, the same on every set (weather pages and the weather map): read off the shared weather model
+ * (shared/src/weather.ts) with the WORLD's seed, so the presenter agrees with the sky. `chSeed` only varies the "local" temperatures.
+ */
+export function forecast(day: number, chSeed = 0, worldSeed = 0) {
+  const f = dayForecast(worldSeed, day);
+  return { ...f, local: (i: number) => f.hi - 2 + Math.floor(hash2(day * 7 + i, 1706 + chSeed) * 5) };
 }
 
 /** A football club's name for a stadium: its place's name and a suffix. */
@@ -148,6 +149,8 @@ export class LiveFeed {
 
 export class TvGuide implements TvSource {
   readonly feed = new LiveFeed();
+  /** the world's seed (the `welcome` message), which the weather model reads */
+  worldSeed = 0;
   /** adverts A6 (docs/adverts.md section 9, not built): an advert break on a channel at a tick, ahead of the programme */
   adBreak: ((ch: TvChannel, tick: number) => Show | null) | null = null;
   /** N5 (citizen memories, not built): told what a set's household is watching when it changes, by home seed */
@@ -364,7 +367,7 @@ export class TvGuide implements TvSource {
 
   /** The weather map: the town's real outline (its built tiles; a player channel its owner's land), places and temperatures. */
   private weatherMap(g: CanvasRenderingContext2D, ch: TvChannel, tick: number) {
-    const day = Math.floor(tick / TICKS_PER_DAY), fc = forecast(day, ch.seed);
+    const day = Math.floor(tick / TICKS_PER_DAY), fc = forecast(day, ch.seed, this.worldSeed);
     g.fillStyle = '#1d3f73'; g.fillRect(0, 0, GFX_W, GFX_H);
     const w = this.d.world;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -410,7 +413,7 @@ export class TvGuide implements TvSource {
     g.fillText(`${WEEKDAY_NAMES[((day % 7) + 7) % 7]}: ${fc.sky}`, 10, 21);
     g.textAlign = 'right'; g.fillText(`${fc.lo}° to ${fc.hi}°`, GFX_W - 10, 21); g.textAlign = 'left';
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, GFX_H - 22, GFX_W, 22);
-    g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif'; g.fillText(`${ch.name} weather · wind ${fc.wind} mph`, 10, GFX_H - 7);
+    g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif'; g.fillText(`${ch.name} weather · wind ${fc.windFrom} ${fc.wind} mph`, 10, GFX_H - 7);
   }
 
   // ---- teletext ------------------------------------------------------------------------------------------
@@ -458,9 +461,9 @@ export class TvGuide implements TvSource {
     heads.forEach((s, i) => { for (const l of lines(s.h, 37).slice(0, 3)) nl.push([l, col[i % 2]]); nl.push(['', '#fff']); });
     out.push({ no: 101, title: 'NEWS', band: '#0000c8', lines: nl });
     // 140 weather
-    const day = Math.floor(tick / TICKS_PER_DAY), fc = forecast(day, ch.seed), tm = forecast(day + 1, ch.seed);
+    const day = Math.floor(tick / TICKS_PER_DAY), fc = forecast(day, ch.seed, this.worldSeed), tm = forecast(day + 1, ch.seed, this.worldSeed);
     out.push({ no: 140, title: 'WEATHER', band: '#008000', lines: [
-      ['TODAY', '#ff0'], [`${fc.sky}.`, '#fff'], [`Highs of ${fc.hi}C, lows of ${fc.lo}C.`, '#fff'], [`Wind ${fc.wind} mph.`, '#fff'], ['', '#fff'],
+      ['TODAY', '#ff0'], [`${fc.sky}.`, '#fff'], [`Highs of ${fc.hi}C, lows of ${fc.lo}C.`, '#fff'], [`Wind ${fc.windFrom}, ${fc.wind} mph.`, '#fff'], ['', '#fff'],
       ['TOMORROW', '#ff0'], [`${tm.sky}. ${tm.lo}C to ${tm.hi}C.`, '#0ff'],
     ] });
     // 430 travel: real jams from the traffic bytes the client holds

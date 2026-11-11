@@ -328,6 +328,7 @@ ui.roadClassChanged();
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
   buildings.rotors.seed = m.seed;
+  tv.worldSeed = m.seed;
   world.me = m.you;
   world.sandbox = !!m.sandbox;
   // a read-only showcase (SPECTATE): only looking; the tool bar, the tech chip, Reset demo and the menu's changes go (style.css body.spectate)

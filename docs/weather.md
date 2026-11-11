@@ -150,3 +150,54 @@ W1 first and alone: everything reads it. W2 and W4 can run side by side after it
 | 20 | Damaging events (floods, storm damage), with warnings and flood risk on the map | on |
 
 (Numbers follow the shared list in `docs/multiplayer-land.md` section 10.)
+
+## Built: W1 (date 2026-11-11)
+
+`shared/src/weather.ts` (exported from `shared/src/index.ts`), `npm run weather:check` (`server/src/weather-check.ts`), and the TV
+forecast reading the model. No wire change, no stored state, no simulation or rendering change.
+
+**API** (as briefed): `climateOf(seed)`, `weatherAt(seed, tick)`, `seasonOf(tick)`, `dayForecast(seed, day)`. Results are
+shared objects (do not mutate). `Weather.wind.dir` is a bearing in radians (see below).
+
+**Compass convention (tile space).** North is -y, south +y, east +x, west -x (the camera looks along (-sin yaw, -cos yaw) in x,z with
+z = tile y: yaw 0 north, 90 west; the map is north-up with y down). A wind is the direction it blows TOWARDS. Bearing b is
+clockwise from north, `dx = sin b`, `dy = -cos b`; a westerly (from the west) is `dx = +1, dy = 0`. `rose[i]` blows towards
+i * 22.5 degrees clockwise from north (0 N, 4 E, 8 S, 12 W). `dayForecast().windFrom` names where it comes from (`'W'` for a westerly).
+
+**What it does.** Climate from the seed: prevailing bearing (86% of worlds from the west, towards east, spread up to about 80 degrees,
+rounded to 16 points; 14% anywhere), mean speed 6-14 tiles/h, wetness 0.2-0.85, swing 6-14 C, annual mean 10-12 C. Year = one
+game week, phase 0 the start of spring, warmest at 0.33 (summer's middle), coldest at 0.83. Systems: 48 h slots whose edges are
+moved by up to 12 h (so 24-72 h each), low / ridge / high / calm (calm only for highs in the cold half of the year), each with
+its own speed, cloud, rain level, temperature anomaly, fog and a wind swing; 8 h blends at fronts. Per game hour: cloud,
+showers from smooth hashed noise, wind direction wobble, gusts, diurnal temperature (coldest 05:00, warmest 15:00, bigger swing when
+clear), dawn fog in highs, all-day fog in calm winter highs, snow when raining below 1 C, storms (stormy low, rain, strong gust).
+Daylight 12 +/- 4 h with the season. `weatherAt` interpolates between whole game hours. Snow cover is simulated for each game
+day from a fixed 72 h before it, so it does not depend on cache state.
+
+**Differences from the design.**
+- `prevailing` is the biggest bin of the computed rose (the model is driven by a hashed base bearing; the rose peak is where the
+  wind actually blows most, usually the same or the next point).
+- The rose is counted over 8 years of the model, not 1: a year holds only about 3 systems and its biggest bin would often not be
+  the prevailing one. Cost once per seed, about 30-40 ms.
+- Not done: the coastal bonus (milder seasons, more wind near water) needs terrain and so is not a pure function of the seed;
+  plume kernels (W3, with the value field).
+- `dayForecast.wind` is in mph at 1.8 per tile/hour so the TV's old range (5-30) stays; sky words include "Snow", "Snow showers",
+  "Gales", "Sunny"; the TV map and teletext 140 now also print the wind's point ("Wind NW, 25 mph").
+- `forecast(day, chSeed, worldSeed)` in `render/tv.ts`: the world seed comes from `welcome` (`tv.worldSeed`, set in `main.ts`); the
+  channel seed only varies the map's local temperatures.
+
+**`weather:check` output (6 years of hours per seed).** All checks pass: determinism (repeat, reversed, strided, after the seed
+cache evicted the world, neighbouring seeds differ); rose of 16 bins summing to 1 with the prevailing direction on the largest;
+snow only below 1 C; systems never shorter than about a day. Sample rows (wetness, wet hours, rose peak, mean temp by season, snow):
+
+| seed | wetness | wet hours | peak bin | spring | summer | autumn | winter | snow |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1234 | 0.39 | 30% | 38% | 13.3 | 17.7 | 8.3 | 4.1 | 0.3% |
+| 987654321 | 0.53 | 37% | 42% | 14.4 | 18.1 | 9.3 | 5.6 | 0.8% |
+| 55 | 0.53 | 43% | 35% | 12.8 | 16.8 | 9.7 | 5.8 | 0.6% |
+| 42 | 0.78 | 57% | 37% | 14.5 | 21.1 | 7.3 | 1.4 | 11% |
+
+Temperatures run about -8 to 32 C; storms 0-5% of hours; seed 42's rose puts 37% in the ESE-towards bin, 22% either side.
+Cost: `weatherAt` 0.1 us warm, about 2 us a call playing on hour by hour from a fresh world, about 170 us for a random jump to a
+cold hour (the snow day's 96 hours), `dayForecast` 40 us. Wet share rises with wetness; wetness over 0.7 gives 55-60%, a little
+wet for a rainy world, tune the constants in `recOf` if it matters.
