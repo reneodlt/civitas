@@ -25,7 +25,8 @@ road) it gains that tile and meets the road.
 coloured by what it will be: new road (pale blue; lilac on unclaimed land, which costs the public premium), road
 already there (faint), an upgrade to another class (green), a bridge deck (blue), a building in the way (amber) or
 refused (red). A chip at the end of the drag gives the running cost, the tiles and how many are on unclaimed land
-("$340 · 17 tiles · 3 on unclaimed land"), the block depth (below), the buildings in the way, and the first reason
+("$340 · 17 tiles · 3 on unclaimed land: public road, you pay its $1.50/day upkeep"; public road is its builder's to
+pay for and fades unused, docs/multiplayer-land.md "Built: M3 roads"), the block depth (below), the buildings in the way, and the first reason
 anything is refused: another owner's land, water without Civil engineering or a bridge that cannot reach the far bank,
 a runway, junction or multi-tile structure (bulldoze it first), a level crossing on curved track, a road joining a
 bridge from the side, or not enough money (in drag order: once the money runs out, the rest is refused). The status

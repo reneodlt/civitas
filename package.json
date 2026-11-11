@@ -25,7 +25,8 @@
     "finance:check": "tsx packages/server/src/finance-check.ts",
     "perf:check": "tsx packages/server/src/loadtest/perf-check.ts",
     "crossing:check": "tsx packages/server/src/crossing-check.ts",
-    "auth:check": "tsx packages/server/src/auth-check.ts"
+    "auth:check": "tsx packages/server/src/auth-check.ts",
+    "roadrules:check": "tsx packages/server/src/roadrules-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

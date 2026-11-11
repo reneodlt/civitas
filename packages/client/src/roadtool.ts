@@ -1,7 +1,7 @@
 import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import {
   KIND_NAMES, BRIDGE_STYLE_NAMES, hasFeature, techFor, isRoad, spendableMoney, planRoad, parallelGap, describeDemolition, ROAD_DRAG_MAX,
-  ROAD_CLASS_DEFS, classDef, isRoadClass, isOneWayAux, auxDir, CDIRS,
+  ROAD_CLASS_DEFS, classDef, isRoadClass, isOneWayAux, auxDir, CDIRS, PUBLIC_ROAD_TUNING,
   type RoadPlan, type RoadEnv, type RoadShape, type RoadTileState,
 } from '@msimcity/shared';
 import type { ClientWorld } from './world';
@@ -213,11 +213,17 @@ export class RoadTool {
     this.guide.visible = true;
   }
 
+  /** The unclaimed tiles of a drag: public road, whose upkeep its builder pays (server sim/publicroads.ts) and which fades unused. */
+  private publicNote(n: number): string {
+    const up = Math.round(n * classDef(this.roadClass).upkeep * 100) / 100;
+    return `${n} on unclaimed land: public road, you pay its $${up % 1 ? up.toFixed(2) : up}/day upkeep (it fades after ${PUBLIC_ROAD_TUNING.fadeDays} days unused)`;
+  }
+
   private chipHtml(v: RoadPlan): string {
     const parts: string[] = [];
     const laid = v.fresh || v.upgrade, cls = this.roadClass;
     if (cls) parts.push(`<span class="cls" style="color:#${classDef(cls).colour.toString(16).padStart(6, '0')}">${esc(classDef(cls).title)}</span>`);
-    parts.push(laid ? `<b>${money(v.cost)}</b> · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : v.have && !v.refused ? `${cls ? classDef(cls).name : 'road'} already` : '');
+    parts.push(laid ? `<b>${money(v.cost)}</b> · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${this.publicNote(v.unclaimed)}` : ''}` : v.have && !v.refused ? `${cls ? classDef(cls).name : 'road'} already` : '');
     if (this.depth) parts.push(`<span class="guide">block ${this.depth} deep</span>`);
     let html = parts.filter(Boolean).join(' · ');
     if (v.demolish.n) html += `<div class="ask">${describeDemolition(v.demolish.kinds)} in the way: you'll be asked</div>`;
@@ -230,7 +236,7 @@ export class RoadTool {
     const cn = classDef(this.roadClass).name;
     if (!path) return ` · ${cn}: drag to lay it${classDef(this.roadClass).oneWay ? ' (the way the traffic goes)' : ''}, one corner like track, hold Shift while dragging for a loop; drag over a road to upgrade it; Ctrl/Cmd+Z undoes the last drag; 3 again picks the class`;
     const v = this.plan(path);
-    let s = v.fresh || v.upgrade ? ` · ${cn} · ${money(v.cost)} · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : ` · ${cn} already`;
+    let s = v.fresh || v.upgrade ? ` · ${cn} · ${money(v.cost)} · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${this.publicNote(v.unclaimed)}` : ''}` : ` · ${cn} already`;
     for (const b of v.bridges) if (b.plan.ok && b.plan.tiles?.length) s += ` · a ${BRIDGE_STYLE_NAMES[b.plan.style!]} of ${plural(b.plan.tiles.length / 3, 'tile')}, ${money(b.plan.cost!)}`;
     if (v.demolish.n) s += ` · ${describeDemolition(v.demolish.kinds)} in the way`;
     if (v.refused) s += ` · ${plural(v.refused, 'tile')} refused: ${v.reason}`;

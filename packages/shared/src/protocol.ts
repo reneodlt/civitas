@@ -70,9 +70,9 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
-  tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
+  tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
   adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
   grant: 'Charter grants and rewards', other: 'Other',
@@ -84,7 +84,8 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  * the ranks' days in the black (server goals.ts `running`) judge the same sum.
  *
  * Running: taxes; fares and fees (transit, taxis, parking, couriers, freight, port dues, school fees, refuse); staff
- * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); utility bills and fuel or
+ * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); public roads (the upkeep of
+ * road the player laid on unclaimed land, server/src/sim/publicroads.ts); utility bills and fuel or
  * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot).
  * One-off: construction (buildings, zoning, roads, junctions, rail, metro, lines and cables, with demolition refunds);
  * builders' fees (a yard's charge for the building it does); land (bought, or sold back); technology; advert
@@ -92,7 +93,7 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  * No category mixes the two (billboard rent was split from campaigns, `adrent`).
  */
 export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
-  tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', interest: 'running', bills: 'running', fuel: 'running',
+  tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', roads: 'running', interest: 'running', bills: 'running', fuel: 'running',
   funeral: 'running', burial: 'running', adrent: 'running',
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
 };

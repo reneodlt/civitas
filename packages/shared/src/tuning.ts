@@ -431,3 +431,27 @@ export const ISSUE_TUNING = {
   commons: 0,
 };
 export type IssueTuning = typeof ISSUE_TUNING;
+
+/**
+ * Public roads (docs/multiplayer-land.md section 8, M3; server/src/sim/publicroads.ts): road laid on unclaimed land since
+ * M3 remembers who laid it (World.publicRoads), and that player pays its upkeep at its class's rate, ledger line
+ * 'roads'. Days are game days.
+ */
+export const PUBLIC_ROAD_TUNING = {
+  /** A public road tile with no traffic and nothing built beside it for this many whole days reverts to plain ground (no refund). */
+  fadeDays: 5,
+  /** Adopted: other owners' citizens or vehicles were seen on it on this many ... */
+  adoptDays: 3,
+  /** ... of the last this many days (at most 30). The builder stops paying and nobody pays (M4: the regional fund). */
+  adoptWindow: 5,
+  /** Traffic on public road tiles is sampled every this many ticks (moving citizens and vehicles; TICKS_PER_HOUR is 100). */
+  sampleTicks: 20,
+  /**
+   * A public road tile other players' traffic used in the adoption window may not be bulldozed when the way round
+   * between its ends is more than this much dearer (route cost, about a tile of street each) than through it.
+   */
+  protectDetour: 16,
+  /** The protection's breadth-first searches give up after this many road tiles and count the land as linked. */
+  reachMax: 20000,
+};
+export type PublicRoadTuning = typeof PUBLIC_ROAD_TUNING;
