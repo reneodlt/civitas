@@ -116,6 +116,10 @@ ok(game.news.all().some((st) => st.k === 'planning' && /tip/.test(st.h)), `the l
 ok(lastPlanning(bob).some((a: PlanAppDTO) => a.id === tipApp.id && a.status === 'open' && a.fw === 2 && a.impact.length > 0), 'the planning list (and the site marker) reaches the clients with its impact by kind');
 why = place(S, ada, 'opentip', 24, 9);
 ok(/planning application is open/.test(why), `the site is kept clear during the notice (${why})`);
+{ // the land market (M7) will not sell or lease land with an open application on it
+  const site = world.parcelAt(24, 9)!;
+  ok(/planning application open/.test(game.deals.canTransfer?.(site) ?? ''), `land under an open application cannot be sold or leased (${game.deals.canTransfer?.(site)})`);
+}
 // a home built during the notice does not vote
 const late = S.home(60, 16, 3);
 ok(!tipApp.roll.some((id) => late.includes(id)), 'a home built on Bob\'s land during the notice is not on the roll');
