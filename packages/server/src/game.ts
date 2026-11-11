@@ -15,6 +15,7 @@ import { Adverts } from './sim/adverts';
 import { News } from './sim/news';
 import { Planning } from './sim/planning';
 import { Utilities } from './sim/utilities';
+import { Contracts } from './sim/contracts';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -59,6 +60,8 @@ export interface Game {
   planning: Planning;
   /** utilities (sim/utilities.ts, docs/utilities.md): the power networks, the hourly solve, bills, faults and repair vans */
   utilities: Utilities;
+  /** service contracts between players (sim/contracts.ts, docs/multiplayer-land.md M8): tariffs, contracts, road access, hourly bills */
+  contracts: Contracts;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -154,6 +157,12 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   { const gate = sim.powerGate; sim.powerGate = (b, target) => deals.mayGrow(b, target) && gate(b, target); }
   net.deals = deals;
   net.utilities = utilities;
+  // service contracts (sim/contracts.ts, M8): a provider's network walks a buyer's roads for power, its refuse sites take the
+  // buyer's homes; billed hourly. A parcel changing hands is followed by the contract's own check every 25 ticks
+  const contracts = new Contracts(world, utilities);
+  utilities.contracts = contracts;
+  sim.refuse.contracts = contracts;
+  net.contracts = contracts;
   if (net.onboarding) net.onboarding.powerHeld = (o) => utilities.heldBack(o);
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
@@ -163,9 +172,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const perf = sim.perf;
   net.perf = perf;
-  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); perf.lap('systems'); };
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); deals.tick(); contracts.tick(); issues.tick(); fires.tick(); adverts.tick(); planning.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, deals, issues, fires, adverts, news, planning, utilities, contracts, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

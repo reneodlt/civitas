@@ -7,6 +7,7 @@ import type { MapInput } from './input';
 import { MapView, type MapMark } from './render/worldmap';
 import { eduTotals, eduIndexLabel } from './eduView';
 import { LandMarketView } from './landmarket';
+import { ServicesPanel } from './services';
 
 /**
  * The world map mode (docs/world-map.md): Tab, the map chip, or zooming out past the 3D limit. Owns the map's camera
@@ -56,6 +57,8 @@ export class MapMode implements MapInput {
   private saidStatus = false;
   /** the land market (landmarket.ts, docs/multiplayer-land.md M7): the panel's market block, the For sale layer and the market box */
   readonly market: LandMarketView;
+  /** service contracts (services.ts, docs/multiplayer-land.md M8): the panel's Services block and the contracts in the market box */
+  readonly services: ServicesPanel;
   private box = document.createElement('div');
   /** a proposed pact's strip: tiles each side of the shared edge */
   private stripD = 2;
@@ -70,6 +73,7 @@ export class MapMode implements MapInput {
     this.panel.addEventListener('input', (e) => { const t = e.target as HTMLInputElement; if (t.id === 'mpRate') this.panel.querySelector('#mpRateV')!.textContent = `${t.value}%`; });
     d.net.tap((m) => this.onMsg(m));
     this.market = new LandMarketView(d.world);
+    this.services = new ServicesPanel(d.world);
     this.box.id = 'mapMarket';
     this.box.className = 'hidden';
     d.mount.appendChild(this.box);
@@ -83,6 +87,8 @@ export class MapMode implements MapInput {
     else if (m.t === 'railLines') this.view.setRailLines(m.lines);
     else if (m.t === 'metroLines') this.view.setMetroLines(m.lines);
     else if (m.t === 'deals') { const { t: _t, ...v } = m; this.market.deals = v; this.panelSig = ''; this.refresh(); }
+    else if (m.t === 'services') { const { t: _t, ...v } = m; this.services.setView(v); this.panelSig = ''; this.refresh(); }
+    else if (m.t === 'svcQuotes') { this.services.setQuotes(m.id, m.quotes); if (this.sel.includes(m.id)) { this.panelSig = ''; this.refresh(); } }
   }
   /** parcels or players changed (main.ts): taken in by the next frame, at most every PARCELS_MS (a parcels message comes with most ticks) */
   parcelsChanged() { this.parcelsStale = true; }
@@ -291,9 +297,10 @@ export class MapMode implements MapInput {
     const status = this.preview();
     const w = this.d.world;
     const sel = this.sel.map((id) => w.parcels.get(id)).filter((p): p is ParcelDTO => !!p);
-    this.box.innerHTML = this.market.boxHtml();
+    this.box.innerHTML = this.market.boxHtml() + this.services.boxHtml();
     this.panel.classList.toggle('hidden', !sel.length);
     if (!sel.length) { this.panelSig = ''; return; }
+    if (sel.length === 1) { const q = this.services.quoteFor(sel[0].id); if (q) this.d.net.send(q); } // the providers in reach (M8)
     const focused = this.panel.contains(document.activeElement) && (document.activeElement as HTMLElement).tagName === 'INPUT';
     const sig = `${sel.map((p) => p.id).join(',')}|${this.splitFor}`;
     if (focused && sig === this.panelSig) { this.fillStats(sel); return; } // typing a name: leave the inputs alone
@@ -359,6 +366,7 @@ export class MapMode implements MapInput {
       <div class="sub">${esc(owner?.name ?? p.owner)} · ${p.w}×${p.h} at (${p.x}, ${p.y})${inEstate ? ` · estate of ${est.length} parcels` : ''}</div>
       ${this.table(inEstate)}
       ${this.market.parcelHtml(p)}
+      ${this.services.parcelHtml(p)}
       ${mine ? `
         <label>Name${inEstate ? ' (the whole estate)' : ''}<input type="text" id="mpName" maxlength="24" value="${esc(p.name)}"></label>
         <label>Colour</label><div class="mswatches">${swatches}</div>
@@ -385,6 +393,14 @@ export class MapMode implements MapInput {
   onView: (x: number, y: number) => void = () => {};
   /** A land-market button (landmarket.ts) in the panel or the market box. Returns whether it was one. */
   private onMarketClick(e: MouseEvent, root: HTMLElement): boolean {
+    const sv = (e.target as HTMLElement).closest<HTMLElement>('[data-sv]');
+    if (sv) { // a service-contract button (services.ts, M8)
+      const m = this.services.act(sv, root);
+      if (m) this.d.net.send(m);
+      this.panelSig = '';
+      this.refresh();
+      return true;
+    }
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mk]');
     if (!b) return false;
     if (b.dataset.mk === 'layer') this.market.layer = !this.market.layer;

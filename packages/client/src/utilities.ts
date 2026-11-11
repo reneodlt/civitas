@@ -78,6 +78,8 @@ export class PowerClient {
     this.env = {
       tile: (x, y) => world.getTile(x, y), sub: (x, y) => world.subAt(x, y), aux: (x, y) => world.auxAt(x, y),
       owner: (x, y) => { const id = world.parcelIdAt(x, y); return id ? world.parcels.get(id)?.owner ?? null : null; },
+      // service contracts (M8): a provider's network walks a buyer's roads on parcels under a power contract (as the server)
+      access: (o, x, y) => this.powerBy.size > 0 && this.powerBy.get(world.parcelIdAt(x, y)) === o,
     };
     this.towers = new InstancedMesh(towerGeometry(), new MeshLambertMaterial({ vertexColors: false }), MAX_TOWERS);
     this.towers.count = 0; this.towers.frustumCulled = false; this.towers.castShadow = true;
@@ -92,6 +94,17 @@ export class PowerClient {
 
   // ---- what the tiles and the server say ---------------------------------------------------------------------------
 
+  /** power contracts this player is a party to (M8, the `services` message): parcel id -> provider */
+  private powerBy = new Map<number, string>();
+  /** The `services` message's contracts (M8): the reach of a provider's network over its buyers' streets. */
+  setContracts(list: readonly { service: string; provider: string; parcels: number[] }[]) {
+    const next = new Map<number, string>();
+    for (const c of list) if (c.service === 'power') for (const id of c.parcels) next.set(id, c.provider);
+    const same = next.size === this.powerBy.size && [...next].every(([k, v]) => this.powerBy.get(k) === v);
+    if (same) return;
+    this.powerBy = next;
+    this.fieldDirty = true;
+  }
   /** A chunk was (re)built: if its roads, owners or nodes changed, the field is rebuilt soon; its power bytes are redone. */
   scanChunk(key: string, c: ClientChunk) {
     let sig = chunkUtilSig(c.tiles, c.sub);
@@ -175,7 +188,8 @@ export class PowerClient {
   /** The node serving a tile for its owner (a road: its own; a building: by its door), as a field index, or -1. */
   private nodeFor(x: number, y: number, t: number, cx: number, cy: number): number {
     if (isRoad(t)) {
-      const owner = this.env.owner(x, y);
+      const owner = this.env.owner(x, y), by = this.powerBy.size ? this.powerBy.get(this.world.parcelIdAt(x, y)) : undefined;
+      if (by) { const i = this.field.nodeIndexAt(by, x, y); if (i >= 0) return i; }
       if (owner) return this.field.nodeIndexAt(owner, x, y);
       for (const o of this.field.ownersIn(cx, cy)) { const i = this.field.nodeIndexAt(o, x, y); if (i >= 0) return i; }
       return -1;
@@ -183,7 +197,8 @@ export class PowerClient {
     if (zoneOf(t) === 0 || levelOf(t) < 1) return -1;
     const d = doorAt(this.env, x, y);
     if (!d) return -1;
-    const owner = this.env.owner(d[0], d[1]);
+    const owner = this.env.owner(d[0], d[1]), by = this.powerBy.size ? this.powerBy.get(this.world.parcelIdAt(d[0], d[1])) : undefined;
+    if (by) { const i = this.field.serving(by, d[0], d[1]); if (i >= 0) return i; }
     return owner ? this.field.serving(owner, d[0], d[1]) : -1;
   }
   private fill(key: string, now: number) {

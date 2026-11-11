@@ -16,6 +16,7 @@ import type { PlanAppDTO } from './planning';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 import type { UtilityInfo, UtilLinkDTO } from './utilities';
 import type { Covenant, LandDealMsg, DealsView } from './landdeals';
+import type { ServiceMsg, ServicesView, ServiceQuote } from './contracts';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | KindToolId;
 
@@ -82,7 +83,9 @@ export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builder
   /** M7 (docs/multiplayer-land.md section 7): land sold to another player (the buyer's side is `land`), and lease rent paid and received */
   | 'landsale' | 'rent'
   /** M5 (docs/multiplayer-land.md section 6): community offers made on planning applications, held and paid out to the affected owners */
-  | 'planning';
+  | 'planning'
+  /** M8 (docs/multiplayer-land.md section 7 "Services"): service contracts, paid hourly: what a provider is paid, and what a buyer pays */
+  | 'contracts' | 'services';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
@@ -90,6 +93,7 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
   grant: 'Charter grants and rewards', landtax: 'Empty-land tax', other: 'Other', levy: 'Landfill levy', recycling: 'Recycling, gas and power sales',
   landsale: 'Land sales', rent: 'Land rent',
   planning: 'Planning offers',
+  contracts: 'Service contracts sold', services: 'Services bought from neighbours',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -101,7 +105,8 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); public roads (the upkeep of
  * road the player laid on unclaimed land, server/src/sim/publicroads.ts); utility bills and fuel or
  * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot); the landfill
- * levy and recycling, gas and power sales (a refuse site's, per home emptied: docs/multiplayer-land.md M4).
+ * levy and recycling, gas and power sales (a refuse site's, per home emptied: docs/multiplayer-land.md M4); service
+ * contracts sold and bought (hourly, M8).
  * One-off: construction (buildings, zoning, roads, junctions, rail, metro, lines and cables, with demolition refunds);
  * builders' fees (a yard's charge for the building it does); land (bought, or sold back); technology; advert
  * campaigns (the artwork); fire and explosion damage; charter grants and goal rewards; other (policy set-up, dev funds).
@@ -112,6 +117,7 @@ export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   funeral: 'running', burial: 'running', adrent: 'running', landtax: 'running', levy: 'running', recycling: 'running', rent: 'running',
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff', landsale: 'oneoff',
   planning: 'oneoff',
+  contracts: 'running', services: 'running',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
 export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
@@ -674,6 +680,8 @@ export type ClientMsg =
   | { t: 'parcelOp'; op: 'ungroup'; id: number }
   /** the land market (docs/multiplayer-land.md M7, shared/src/landdeals.ts): listings, offers, leases and pacts */
   | LandDealMsg
+  /** service contracts (docs/multiplayer-land.md M8, shared/src/contracts.ts): tariffs, signing, notice, quotes */
+  | ServiceMsg
   /** the world map's ground (shared/src/worldmap.ts): flat [sx, sy, version held, …] of the sectors in view, at detail `l` (0 a byte per tile, 1 per 4×4, 2 per 16×16; default 0); answered with a 'mapSector' for each whose version differs */
   | { t: 'map'; s: number[]; l?: number }
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
@@ -800,6 +808,10 @@ export type ServerMsg =
   | { t: 'landPrice'; cx: number; cy: number; d: string }
   /** the land market (docs/multiplayer-land.md M7): every listing, lease and pact, and the offers this player made or received */
   | ({ t: 'deals' } & DealsView)
+  /** M8 service contracts: every posted tariff, the regional prices and this player's contracts, on joining and when they change */
+  | ({ t: 'services' } & ServicesView)
+  /** M8: the providers that could serve parcel `id` (answer to a `svc` quote) */
+  | { t: 'svcQuotes'; id: number; quotes: ServiceQuote[] }
   /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
   | ({ t: 'ads' } & AdsDTO)
   /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */
