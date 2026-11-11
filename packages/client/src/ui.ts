@@ -248,6 +248,11 @@ export class UI {
     if (em) { const n = this.ruleName(); em.textContent = n ? `· ${n}` : ''; }
     this.rulePicker?.refresh();
   }
+  /** A tool button's cost label (the buy tool's: the flat price, or "by value" under the market rules). */
+  setToolCost(id: string, text: string) {
+    const b = $('tools').querySelector(`button[data-tool="${id}"] .cost`);
+    if (b) b.textContent = text;
+  }
   /** The class picked changed: the road button names it. */
   roadClassChanged() {
     const em = this.roadButton()?.querySelector('em.tier');

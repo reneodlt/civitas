@@ -352,6 +352,35 @@ export const ECONOMY_TUNING = {
 export type EconomyTuning = typeof ECONOMY_TUNING;
 
 /**
+ * Land and money on a shared world (docs/multiplayer-land.md section 3, M2; shared/src/land.ts, server/src/sim/land.ts).
+ * Frontier starts, sandboxes (test cities, demos), showcases and local mode keep START_MONEY / FRONTIER_MONEY and the
+ * flat LAND_PRICE_PER_TILE. Days are game days.
+ */
+export const LAND_TUNING = {
+  /** a new player's treasury on a shared world (instead of START_MONEY) */
+  startMoney: 3000,
+  /** the free homestead: a new player's first purchase is free when it fits in homestead × homestead tiles; a bigger first purchase pays for the tiles beyond that many */
+  homestead: 16,
+  /**
+   * The price of a tile: base × exp(gain × (land value − 1)), clamped to [min, max] dollars, where the land value is the
+   * published value of the 4×4 cell (sim/value.ts) without its green and quiet terms (open country would otherwise be
+   * the dearest land of all). Wilderness (land value 1) costs `base`; a busy, well-served street about 1.4 costs ~$7.
+   */
+  base: 1.5, gain: 4, min: 1, max: 40,
+  /** land that shares no edge with yours (an outpost), and a new player's first plot, must be at least this many tiles a side */
+  outpostMin: 8,
+  /** the empty-land tax: each midnight, this share of the current price of every owned dry tile with nothing on it (no road, zone, building, track or structure) */
+  emptyTax: 0.02,
+  /** the tax pauses once the owner has not been seen (connected) for this many days */
+  awayPauseDays: 3,
+  /** an owner away this many days: parcels with no building on them (roads and empty zoned lots at most) go back to the market, the owner paid the current price */
+  abandonEmptyDays: 30,
+  /** ... and after this many, every other parcel goes to the Commons ('sys') at the current land price. 0: built land is never taken */
+  abandonBuiltDays: 60,
+};
+export type LandTuning = typeof LAND_TUNING;
+
+/**
  * The first five minutes (Audit #1, docs/first-five.md): the pioneer camp's settlers, the starter crew and the camp's
  * turnover. The camp's size and price are catalogue data (shared/src/buildings/camp.ts); the lighter first house is
  * residential level 1's `work` (20, a third of WORK_PER_LEVEL).

@@ -124,9 +124,13 @@ if (HANKO_API_URL && AUTH) console.log(`sign-in required: Hanko at ${HANKO_API_U
 if (DEV_AUTH) console.warn('sign-in required: DEV sign-in (DEV_AUTH_USERS), for testing only; never on a public server');
 // ---- http (serves the built client when present; the game's WebSockets share its port) -----------
 const http = createServer((req, res) => void serve(req, res));
+/** The market rules of a shared world (docs/multiplayer-land.md M2: a free homestead and little cash, land priced by value,
+ *  outposts, the empty-land tax, abandoned land) on the live world; LAND=classic keeps the flat price and START_MONEY.
+ *  game.ts never plays them on a frontier, a test city, a demo or a showcase. */
+const MARKET = !CHILD && !SPECTATE && process.env.LAND !== 'classic';
 /** the game (game.ts): simulation, airports, rail and the protocol, here over WebSockets on the http port. Draft kinds and
  *  dev actions on a non-production server; a test city or demo is a sandbox (all tech, endless funds, no onboarding). */
-const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE, ...(AUTH ? { auth: AUTH } : {}) }, SIM_STEPS);
+const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE, market: MARKET, ...(AUTH ? { auth: AUTH } : {}) }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
 game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches light (sim/fires.ts; an A/B control)
 if (DEMO) {

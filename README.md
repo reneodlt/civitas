@@ -156,6 +156,21 @@ the open country around your holdings, or if it would enclose a pocket of
 unclaimed land bigger than four tiles. Small notches are fine and water never
 counts as an enclosure. The buy rectangle turns red and the status line says
 why before you let go; the server makes the same check and is the authority.
+
+On the live shared world the **market rules** apply instead (docs/multiplayer-land.md "Built: M2 land and money"; a
+frontier, a test city or demo, a showcase, local mode and a server started with `LAND=classic` keep the rules above, the
+flat $10 a tile and $20,000): a new mayor starts with **$3,000 and a free homestead**, their first purchase free when it
+fits in 16×16 (a bigger first purchase pays only for the tiles beyond 256). **Land is priced by what is near it**: a tile
+costs $1.50 in open country and more near jobs, shops, stops, services and culture (about $7 on a busy, well-served
+street), less under smell, noise or hazard, from the neighbourhood value of each 4×4 cell; the buy rectangle's status line
+shows the price the server will charge (it sends each visible chunk's prices, `landPrice`). Land need not touch yours: a
+purchase that shares no edge with your land (an **outpost**), and your first plot, must be at least 8×8, and walling
+anyone in is still refused. Land with nothing on it (no road, zone, building or structure) pays an **empty-land tax**
+each midnight, 2% of its price ("Empty-land tax" in the ledger), which pauses once you have been away 3 game days.
+**Abandoned land**: after 30 days away, parcels with no building on them go back to the market and their current price
+goes into your treasury (roads on them stay, as public road); after 60 days built land goes to the Commons at its land
+price. Selling land back in the recovery plan is at the market price too.
+
 Roads are dragged and built on release: the ghost shows each tile's cost and, in red, why anything will be refused,
 and a road over a building asks first (demolish it, or build round it). Zones are painted by dragging; zoning and
 parking lots go round road tiles and buildings (bulldoze first to rebuild there), and the server says how many lots
@@ -626,7 +641,8 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
   storage or Redis) replacing the JSON snapshot in `data/world.json`.
 - Binary wire format (the protocol is already flat numeric arrays for the hot
   messages, so this is mechanical).
-- Selling parcels and a market land value (subdividing and combining are on the world map), utilities, avenues and transit,
+- Selling parcels to other players (land is priced by its neighbourhood value on the shared world, docs/multiplayer-land.md
+  M2; subdividing and combining are on the world map), utilities, avenues and transit,
   and a proper economy loop for commercial/industrial income. Designed in docs/multiplayer-land.md: neighbourhood value
   (nuisance and amenity), planning votes and campaigns, service contracts between players, a land market.
 - Weather and seasons (docs/weather.md): a seeded world weather with a prevailing wind, a season cycle each game week,

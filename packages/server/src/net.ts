@@ -1,7 +1,7 @@
 import type { Conn, ConnSource } from './transport';
 import { CI, type PhaseStats } from './perf/phases';
 import {
-  CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ZONE_COST,
+  CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, LAND_TUNING, landCost, MAX_PARCEL_EDGE, ZONE_COST,
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
   isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
@@ -29,6 +29,7 @@ import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
 import { mothballable, adminRefusal, type Finance } from './sim/finance';
+import type { LandMarket } from './sim/land';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
@@ -49,6 +50,8 @@ interface Client {
   hist?: boolean;
   /** issue bubbles (flushIssues): the last problems list sent; the overlay channel asked for, a hash of what each chunk last got, chunks still to look at */
   probSig?: string; ovl?: number; ovlSent?: Map<string, number>; ovlQueue?: string[];
+  /** market rules (sim/land.ts): the land price bytes each subscribed chunk last got */
+  landSent?: Map<string, string>;
 }
 
 /** A road drag kept for undo (Net.undoRoad): the land tiles it laid with what they were, its bridges, what it cost. */
@@ -86,6 +89,10 @@ export interface GameConfig {
   /** sign-in (auth.ts, docs/accounts.md): when set, a hello must carry a session token, and the account it names decides the
    *  player; the name typed is used only once, to make an account's mayor. Left out: the name is the identity, as before. */
   auth?: AuthHook;
+  /** a shared world's market rules (docs/multiplayer-land.md M2, sim/land.ts): a free homestead and LAND_TUNING.startMoney
+   *  for new players, land priced by value, outposts, the empty-land tax, abandoned land. game.ts ignores it on a frontier,
+   *  a sandbox or a showcase. Left out: the classic rules (START_MONEY, the flat LAND_PRICE_PER_TILE, adjacent land). */
+  market?: boolean;
 }
 /** Who a session token says is signing in: the identity provider's user id. */
 export interface AuthIdentity { sub: string; email?: string }
@@ -143,6 +150,13 @@ export class Net {
   harbours: Harbours | null = null;
   /** the overdraft, administration and the recovery plan (sim/finance.ts); set by game.ts */
   finance: Finance | null = null;
+  /** land and money on a shared world (sim/land.ts); set by game.ts. Its `market` says whether the market rules are on */
+  land: LandMarket | null = null;
+  private get market() { return !!this.land?.market; }
+  /** the value field's version when the land prices were last looked at (flushLand) */
+  private landVer = -1;
+  /** the game hour connected players were last marked seen (flushLand) */
+  private seenHour = -1;
   /** house fires (sim/fires.ts): the 'fires' message, building tooltips and the owners' notices; set by game.ts */
   fires: Fires | null = null;
   /** campaigns and rented ad slots (sim/adverts.ts): the 'ads' message and the advert intents; set by game.ts */
@@ -231,8 +245,8 @@ export class Net {
     if (c.player.admin) { const no = adminRefusal(m); if (no) return this.toast(c, no); }
     switch (m.t) {
       case 'sub': return this.subscribe(c, m.chunks);
-      case 'unsub': for (const [cx, cy] of m.chunks) { c.subs.delete(chunkKey(cx, cy)); c.ovlSent?.delete(chunkKey(cx, cy)); } return;
-      case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
+      case 'unsub': for (const [cx, cy] of m.chunks) { c.subs.delete(chunkKey(cx, cy)); c.ovlSent?.delete(chunkKey(cx, cy)); c.landSent?.delete(chunkKey(cx, cy)); } return;
+      case 'buy': return this.buy(c, m.x, m.y, m.w, m.h, m.q);
       case 'build':
         if (m.tool === 'road') return this.road(c, m.tiles, this.cfg.devTools && m.dev === true, typeof m.cls === 'number' ? m.cls : 0, m.demolish === true);
         return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
@@ -364,8 +378,10 @@ export class Net {
   private enter(c: Client, id: string, name: string) {
     if (this.cfg.spectate && !this.w.players.has(id)) this.visitors.add(id);
     const newcomer = !this.w.players.has(id);
-    c.player = this.w.getOrCreatePlayer(id, name, this.w.start === 'frontier' ? FRONTIER_MONEY : START_MONEY);
+    c.player = this.w.getOrCreatePlayer(id, name, this.w.start === 'frontier' ? FRONTIER_MONEY : this.market ? LAND_TUNING.startMoney : START_MONEY);
     if (newcomer && this.w.start === 'frontier') this.charter(c.player);
+    if (newcomer && this.market) c.player.homestead = LAND_TUNING.homestead; // a shared world: little cash and a free homestead (M2)
+    c.player.seen = this.w.tick;
     if (this.cfg.sandbox && !this.cfg.spectate) { // a test city is a sandbox: every technology and an endless treasury for whoever joins
       c.player.tech = [...new Set([...c.player.tech, ...ALL_TECH_IDS])];
       c.player.devUnlimited = true;
@@ -376,6 +392,7 @@ export class Net {
     this.send(c, {
       t: 'welcome', you: c.player.id, seed: this.w.seed, day: this.w.day, ...(this.cfg.sandbox ? { sandbox: true } : {}), ...(this.cfg.spectate ? { spectate: true } : {}),
       ...(this.w.start === 'frontier' ? { start: 'frontier' as const, ...(this.w.home ? { home: this.w.home } : {}) } : {}),
+      ...(this.market ? { land: 'market' as const } : {}),
       players: this.playerDTOs(true),
       parcels: [...this.w.parcels.values()].map((p) => this.w.parcelDTO(p)),
     });
@@ -500,6 +517,7 @@ export class Net {
       const kerb = this.kerbBytes(cx, cy);
       if (traffic || kerb) this.send(c, { t: 'traffic', cx, cy, d: u8ToB64(traffic ?? new Uint8Array(0)), ...(kerb ? { k: u8ToB64(kerb) } : {}) });
       this.issuesOnSub(c, key);
+      if (this.market) this.landTo(c, key, cx, cy);
       // everyone already moving in this chunk, since later frames only carry changes
       const out: number[] = [];
       for (const a of this.sim.agents()) {
@@ -592,11 +610,16 @@ export class Net {
   /** Whether this player may edit land owned by `owner`: their own, or anyone's in a sandbox (a test city or demo: nobody's work is protected). */
   private mayEdit(p: Player, owner: string) { return owner === p.id || this.cfg.sandbox; }
 
-  private buy(c: Client, x: number, y: number, w: number, h: number) {
+  private buy(c: Client, x: number, y: number, w: number, h: number, quote?: number) {
     const p = c.player!;
     x = Math.floor(x); y = Math.floor(y); w = Math.floor(w); h = Math.floor(h);
     if (!(w >= 1 && h >= 1 && w <= MAX_PARCEL_EDGE && h <= MAX_PARCEL_EDGE)) return this.toast(c, `Parcels are 1–${MAX_PARCEL_EDGE} tiles per side`);
-    const cost = w * h * LAND_PRICE_PER_TILE;
+    // market rules (sim/land.ts): the price is the land's value; the first purchase may be the free homestead
+    const market = this.land?.market ? this.land : null;
+    const price = market ? market.priceOf({ x, y, w, h }) : w * h * LAND_PRICE_PER_TILE;
+    const homestead = market ? p.homestead : undefined;
+    const cost = landCost({ w, h }, price, homestead);
+    if (market && typeof quote === 'number' && Number.isFinite(quote) && cost > quote + 0.5) return this.toast(c, `The price of that land has just changed to $${cost.toLocaleString('en-GB')} (the neighbourhood was valued again): look and buy again`);
     if (this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, 'for that land'));
     let land = 0;
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
@@ -613,16 +636,17 @@ export class Net {
       ownerAt: (tx, ty) => this.w.parcelAt(tx, ty)?.owner ?? null,
       isWater: (tx, ty) => !isBuildable(this.w.getTile(tx, ty)),
       ownerName: (id) => this.w.players.get(id)?.name ?? id,
-    });
+    }, market ? { outposts: true, outpostMin: LAND_TUNING.outpostMin } : undefined);
     if (!verdict.ok) return this.toast(c, verdict.reason);
-    const parcel = { id: this.w.nextId++, owner: p.id, name: `${p.name}'s plot`, x, y, w, h, taxRate: DEFAULT_TAX, stats: emptyStats() };
+    const parcel = { id: this.w.nextId++, owner: p.id, name: homestead ? `${p.name}'s homestead` : `${p.name}'s plot`, x, y, w, h, taxRate: DEFAULT_TAX, stats: emptyStats() };
     this.w.parcels.set(parcel.id, parcel);
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.w.setParcelId(xx, yy, parcel.id); // a public road under it leaves World.publicRoads
     this.w.recountRoads(parcel.id); // ... and its owner pays for it now, as for any road of theirs
-    this.w.credit(p.id, -cost, 'land');
+    if (cost) this.w.credit(p.id, -cost, 'land');
+    if (homestead) { delete p.homestead; this.w.playersDirty = true; }
     this.w.dirtyParcels.add(parcel.id);
-    this.toast(c, `Bought ${w}×${h} tiles for $${cost}`, 'info');
-    if (owned.length === 0 && !this.roadNear(x, y, w, h)) this.toast(c, "No road reaches this land yet, and lots grow only beside a road the builders can reach. Extend your land to the nearest road (new land must border yours) and lay a road along it; roads on unclaimed land need Public works", 'info');
+    this.toast(c, homestead && !cost ? `Your homestead: ${w}×${h} tiles, free` : homestead ? `Bought ${w}×${h} tiles for $${cost} (the first ${homestead}×${homestead} free: your homestead)` : `Bought ${w}×${h} tiles for $${cost}`, 'info');
+    if (owned.length === 0 && !this.roadNear(x, y, w, h)) this.toast(c, `No road reaches this land yet, and lots grow only beside a road the builders can reach. ${market ? 'Buy land out to the nearest road' : 'Extend your land to the nearest road (new land must border yours)'} and lay a road along it; roads on unclaimed land need Public works`, 'info');
   }
 
   /**
@@ -1441,6 +1465,7 @@ export class Net {
 
   flush() {
     const w = this.w;
+    this.flushLand();
     // under bytes (tunnels and platforms, docs/underground.md): nothing on the surface reads them, so they only need to beat the tile words
     if (w.dirtyUnder.size) {
       const byChunk = new Map<string, number[]>();
@@ -1677,6 +1702,29 @@ export class Net {
   }
 
   get connections() { return this.clients.size; }
+
+  // ---- land prices and presence (market rules, sim/land.ts) ------------------------------------------------
+
+  /** A subscribed chunk's land price bytes, when they differ from what the client last got ('' the wild price, the client's default). */
+  private landTo(c: Client, key: string, cx: number, cy: number) {
+    const d = this.land!.priceMsg(cx, cy), sent = (c.landSent ??= new Map());
+    const was = sent.get(key) ?? '';
+    sent.set(key, d);
+    if (d !== was) this.send(c, { t: 'landPrice', cx, cy, d });
+  }
+  /** Players connected are seen once a game hour; after the value field's hourly pass, every client's subscribed chunks whose prices moved. */
+  private flushLand() {
+    const land = this.land;
+    if (!land) return;
+    const hour = Math.floor(this.w.tick / TICKS_PER_HOUR);
+    if (hour !== this.seenHour) { this.seenHour = hour; for (const c of this.clients) if (c.player && c.conn.open) c.player.seen = this.w.tick; }
+    if (!land.market || this.sim.value.version === this.landVer) return;
+    this.landVer = this.sim.value.version;
+    for (const c of this.clients) {
+      if (!c.player || !c.conn.open) continue;
+      for (const key of c.subs) { const [cx, cy] = parseKey(key); this.landTo(c, key, cx, cy); }
+    }
+  }
 
   // ---- issue bubbles, the problems list and the overlays (sim/issues.ts, overlays.ts, shared/src/issues.ts) ----------
 

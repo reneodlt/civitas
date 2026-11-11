@@ -63,6 +63,8 @@ export interface PlayerDTO {
   policies?: string[];
   /** dev servers only */
   devUnlimited?: boolean;
+  /** a shared world's free homestead not yet taken (docs/multiplayer-land.md M2): the first purchase up to this many tiles a side is free */
+  homestead?: number;
   /** money in and out by game day (World.credit); sent at most once a game hour, absent in between (keep the last one) */
   ledger?: LedgerDTO;
   /** the overdraft and administration (server sim/finance.ts); present while the treasury is below zero, the player is in
@@ -70,12 +72,12 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'roads' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'landtax' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', roads: 'Public roads', builders: "Builders' fees",
   build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
   adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
-  grant: 'Charter grants and rewards', other: 'Other',
+  grant: 'Charter grants and rewards', landtax: 'Empty-land tax', other: 'Other',
 };
 /**
  * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
@@ -94,7 +96,7 @@ export const LEDGER_LABELS: Record<LedgerCat, string> = {
  */
 export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
   tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', roads: 'running', interest: 'running', bills: 'running', fuel: 'running',
-  funeral: 'running', burial: 'running', adrent: 'running',
+  funeral: 'running', burial: 'running', adrent: 'running', landtax: 'running',
   build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
 };
 /** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
@@ -592,7 +594,7 @@ export type ClientMsg =
   | { t: 'priority'; x: number; y: number; priority: number }
   | { t: 'sub'; chunks: [number, number][] }
   | { t: 'unsub'; chunks: [number, number][] }
-  | { t: 'buy'; x: number; y: number; w: number; h: number }
+  | { t: 'buy'; x: number; y: number; w: number; h: number; /** the price the client showed (market rules): refused when the server's is higher */ q?: number }
   /** `dev` (sent with ?dev) skips technology locks, honoured only by a server not running in production */
   | { t: 'build'; tool: Tool; tiles: [number, number][]; dev?: boolean;
       /** multi-tile kinds: the orientation the player chose (0-3, the direction the front faces: 0 = +y, 1 = +x, 2 = -y, 3 = -x); left out = the server picks the road side */
@@ -673,7 +675,7 @@ export type ServerMsg =
   /** a server with sign-in did not let this hello in (docs/accounts.md): `signIn` = no token, or one that expired or did not check
    *  out; `name` = a new account, which needs a mayor name (again, with `msg` saying why, when the one given cannot be had) */
   | { t: 'auth'; need: 'signIn' | 'name'; msg?: string }
-  | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
+  | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; /** a shared world's market rules (docs/multiplayer-land.md M2): land priced by value (`landPrice`), outposts, the empty-land tax */ land?: 'market'; players: PlayerDTO[]; parcels: ParcelDTO[] }
   | { t: 'chunk'; chunk: ChunkDTO }
   /** flat quads: x, y, packedTile, parcelId */
   | { t: 'tiles'; u: number[] }
@@ -748,6 +750,8 @@ export type ServerMsg =
   | { t: 'problems'; p: number[]; /** one per triple: why a very unhappy home is (shared/src/issues.ts MOOD_REASONS), 0 for others; absent when none */ r?: number[] }
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
   | { t: 'overlay'; ch: number; cx: number; cy: number; d: string }
+  /** market rules (shared/src/land.ts): a subscribed chunk's land price bytes, one per 4×4 cell (base64); '' is the wild price everywhere */
+  | { t: 'landPrice'; cx: number; cy: number; d: string }
   /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
   | ({ t: 'ads' } & AdsDTO)
   /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */
