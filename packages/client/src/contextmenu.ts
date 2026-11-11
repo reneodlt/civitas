@@ -1,5 +1,5 @@
 import {
-  BULLDOZE_COST, LAND_PRICE_PER_TILE, KIND_NAMES, PRIORITY_NAMES, Terrain, isRoad, isRailAux, isAirfieldAux, kindIdOf, levelOf, priorityOf, stopModeOf,
+  BULLDOZE_COST, KIND_NAMES, PRIORITY_NAMES, Terrain, isRoad, isRailAux, isAirfieldAux, kindIdOf, levelOf, priorityOf, stopModeOf,
   terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, STREET_RULE_DEFS, StreetRule, streetRuleTiles, streetRuleCost, streetAxisAt, busLaneOk, hasFeature, techFor, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
@@ -36,6 +36,8 @@ export interface CtxDeps {
   focus(x: number, y: number): void;
   openLines(): void;
   buyVerdict(r: { x: number; y: number; w: number; h: number }): PurchaseCheck;
+  /** what buying the rectangle would cost me (main.ts buyCost: the flat price, or the market price less a homestead) */
+  buyCost(r: { x: number; y: number; w: number; h: number }): { cost: number };
   /** hide the hover tooltip while the menu is up */
   onOpen(): void;
 }
@@ -372,11 +374,11 @@ export class ContextMenu {
     const land: MenuItem[] = [];
     if (!parcel) {
       const v = water ? { ok: false as const, reason: 'That is water' } : d.buyVerdict({ x, y, w: 1, h: 1 });
-      const price = LAND_PRICE_PER_TILE;
+      const price = d.buyCost({ x, y, w: 1, h: 1 }).cost;
       land.push({
         key: 'buy', label: 'Buy this tile', hint: v.ok ? money(price) : 'cannot buy',
         disabled: !v.ok ? v.reason : price > cash ? `Needs ${money(price)}; you have ${money(cash)}` : undefined,
-        run: () => d.net.send({ t: 'buy', x, y, w: 1, h: 1 }),
+        run: () => d.net.send({ t: 'buy', x, y, w: 1, h: 1, q: price }),
       });
     }
     return { title: water ? 'Water' : parcel ? 'Open land' : 'Unclaimed land', sub, swatch, groups: [land, [...parcelItem(), view]] };

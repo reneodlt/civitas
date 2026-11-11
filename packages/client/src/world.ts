@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO, type RoadRule, type RoadRuleDTO } from '@msimcity/shared';
+import { CHUNK_SIZE, landPriceOf, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO, type RoadRule, type RoadRuleDTO } from '@msimcity/shared';
 
 export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean;
   /** what changed since the chunk was last rebuilt (DIRTY_* bits): render/chunkWork.ts runs only the passes that read it */
@@ -54,6 +54,10 @@ export class ClientWorld {
   home: [number, number] | null = null;
   /** a sandbox (test city or demo, from the welcome): anyone may edit any parcel and buy land anywhere */
   sandbox = false;
+  /** a shared world's market rules (welcome.land, docs/multiplayer-land.md M2): land priced by value, outposts, the homestead */
+  market = false;
+  /** market rules: each subscribed chunk's land price bytes (the `landPrice` message, shared/src/land.ts); absent: the wild price */
+  landPrices = new Map<string, Uint8Array>();
   parcelsDirty = false;
   /**
    * Bumps whenever something a transit line depends on changed on the server: a tile's road bit, terrain or family (a road
@@ -125,7 +129,13 @@ export class ClientWorld {
     this.chunks.delete(key); this.traffic.delete(key); this.kerb.delete(key);
     if (this.issues.delete(key)) this.issuesVersion++;
     if (this.overlay.delete(key)) this.overlayDirty.add(key);
+    this.landPrices.delete(key);
   }
+  applyLandPrice(cx: number, cy: number, d: string) {
+    if (d) this.landPrices.set(chunkKey(cx, cy), b64ToU8(d)); else this.landPrices.delete(chunkKey(cx, cy));
+  }
+  /** The price of a rectangle under the market rules, from the same bytes the server prices it from. */
+  landPrice(r: { x: number; y: number; w: number; h: number }): number { return landPriceOf(r, (cx, cy) => this.landPrices.get(chunkKey(cx, cy))); }
   applyIssues(cx: number, cy: number, d: string) {
     const key = chunkKey(cx, cy);
     if (!this.chunks.has(key)) return;

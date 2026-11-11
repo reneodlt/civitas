@@ -2,7 +2,9 @@
  * Land purchase rules, shared so the server (authoritative) and the client (buy-rectangle preview)
  * run exactly the same code.
  *
- *  1. Adjacency: after your first parcel, new land must share an edge (not just a corner) with land you own.
+ *  1. Adjacency: after your first parcel, new land must share an edge (not just a corner) with land you own. With
+ *     `outposts` (a shared world's market rules, docs/multiplayer-land.md section 3, M2) land anywhere is allowed, but
+ *     a purchase that shares no edge with yours (an outpost), and the first, must be at least `outpostMin` a side.
  *  2. No islanding: a purchase may not leave another owner's parcel (the Commons included) walled in by your
  *     land, nor enclose a pocket of unclaimed land larger than MAX_ENCLOSED_UNCLAIMED tiles.
  *
@@ -24,6 +26,8 @@ export interface LandView {
 }
 
 export type PurchaseCheck = { ok: true } | { ok: false; reason: string };
+/** How the rules are played: the market rules of a shared world (separate outposts) or the classic ones (absent). */
+export interface PurchaseRules { outposts?: boolean; outpostMin?: number }
 
 export const MAX_ENCLOSED_UNCLAIMED = 4;
 export const ENCLOSE_MARGIN = 2;
@@ -33,6 +37,9 @@ export const MSG_OVERLAP = 'That land overlaps an existing parcel';
 export const MSG_ALL_WATER = 'That is all water';
 export const MSG_NOT_ADJACENT = 'New land must border land you already own';
 export const MSG_ENCLOSE_UNCLAIMED = 'That purchase would enclose unclaimed land';
+export const msgOutpostSmall = (n: number, first: boolean) => first
+  ? `A first plot must be at least ${n}×${n} tiles`
+  : `Land not touching yours (an outpost) must be at least ${n}×${n} tiles`;
 export const MSG_TOO_COMPLEX = 'That purchase is too complicated to check; buy a smaller piece';
 
 const OFF = 1 << 24, M = 1 << 26;
@@ -76,7 +83,7 @@ class Heap {
 
 const NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-export function checkPurchase(rect: LandRect, buyerId: string, land: LandView): PurchaseCheck {
+export function checkPurchase(rect: LandRect, buyerId: string, land: LandView, rules: PurchaseRules = {}): PurchaseCheck {
   const { x, y, w, h } = rect;
   const inRect = (px: number, py: number) => px >= x && px < x + w && py >= y && py < y + h;
 
@@ -93,12 +100,20 @@ export function checkPurchase(rect: LandRect, buyerId: string, land: LandView): 
   for (let i = 0; i < w; i++) { ring.push([x + i, y - 1], [x + i, y + h]); }
   for (let j = 0; j < h; j++) { ring.push([x - 1, y + j], [x + w, y + j]); }
 
+  const adjacent = ring.some(([rx, ry]) => land.ownerAt(rx, ry) === buyerId);
+  if (rules.outposts) {
+    const min = rules.outpostMin ?? 0;
+    if (!adjacent && (w < min || h < min)) return { ok: false, reason: msgOutpostSmall(min, land.owned.length === 0) };
+  }
   if (land.owned.length === 0) return { ok: true };           // first parcel: anywhere
-  if (!ring.some(([rx, ry]) => land.ownerAt(rx, ry) === buyerId)) return { ok: false, reason: MSG_NOT_ADJACENT };
+  if (!rules.outposts && !adjacent) return { ok: false, reason: MSG_NOT_ADJACENT };
 
-  // Bounding box of everything the buyer would own, grown by the margin.
+  // Bounding box of everything the buyer would own, grown by the margin. With outposts only the holdings joined to the
+  // new rectangle (sharing an edge or a corner, through each other) can close a wall round anything, so the box is
+  // theirs: a far outpost does not make the search cover the country in between.
+  const wall = rules.outposts ? joined(rect, land.owned) : land.owned;
   let x0 = x, y0 = y, x1 = x + w - 1, y1 = y + h - 1;
-  for (const r of land.owned) {
+  for (const r of wall) {
     if (r.x < x0) x0 = r.x;
     if (r.y < y0) y0 = r.y;
     if (r.x + r.w - 1 > x1) x1 = r.x + r.w - 1;
@@ -151,4 +166,15 @@ export function checkPurchase(rect: LandRect, buyerId: string, land: LandView): 
     if (pocket > MAX_ENCLOSED_UNCLAIMED) return { ok: false, reason: MSG_ENCLOSE_UNCLAIMED };
   }
   return { ok: true };
+}
+
+/** The rectangles of `owned` joined to `r` by sharing an edge or a corner, directly or through each other. */
+function joined(r: LandRect, owned: readonly LandRect[]): LandRect[] {
+  const touch = (a: LandRect, b: LandRect) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
+  const out: LandRect[] = [], left = [...owned], queue: LandRect[] = [r];
+  while (queue.length) {
+    const a = queue.pop()!;
+    for (let i = left.length - 1; i >= 0; i--) if (touch(a, left[i])) { const b = left.splice(i, 1)[0]; out.push(b); queue.push(b); }
+  }
+  return out;
 }

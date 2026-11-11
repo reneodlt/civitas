@@ -101,6 +101,10 @@ export interface Player {
   admin?: { since: number };
   /** settlement rank and milestone feed (ranks.ts); saved with the player, absent in older saves (derived on first use) */
   ranks?: RankState;
+  /** a shared world's free homestead not yet taken (net.ts buy, docs/multiplayer-land.md M2): tiles a side; saved */
+  homestead?: number;
+  /** the tick the player was last seen connected (net.ts): the empty-land tax pauses and land is abandoned by it (sim/land.ts); saved */
+  seen?: number;
 }
 
 /** Anything that moves along a path; drivers also live in a traffic lane. */
@@ -1214,7 +1218,7 @@ export class World {
   /** `ledger`: include the day's money ledger (net.ts sends it once a game hour, not with every money change) */
   playerDTO(p: Player, online: boolean, ledger = false): PlayerDTO {
     return {
-      id: p.id, name: p.name, color: p.color, money: Math.round(p.money * 100) / 100, online, tech: [...p.tech], policies: [...(p.policies ?? [])], progress: { ...p.progress }, devUnlimited: p.devUnlimited || undefined,
+      id: p.id, name: p.name, color: p.color, money: Math.round(p.money * 100) / 100, online, tech: [...p.tech], policies: [...(p.policies ?? [])], progress: { ...p.progress }, devUnlimited: p.devUnlimited || undefined, homestead: p.homestead || undefined,
       ledger: ledger ? this.ledgerDTO(p) : undefined, fin: this.financeDTO?.(p),
     };
   }

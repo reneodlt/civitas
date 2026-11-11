@@ -2,7 +2,7 @@ import { JunctionTools, isJunctionTool } from './junctiontools';
 import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, seasonOf, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, LAND_TUNING, landCost, spendableMoney, TICKS_PER_DAY, TICK_MS, seasonOf, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -331,6 +331,8 @@ net.on('welcome', (m) => {
   tv.worldSeed = m.seed;
   world.me = m.you;
   world.sandbox = !!m.sandbox;
+  world.market = m.land === 'market'; world.landPrices.clear(); // a shared world's market rules (docs/multiplayer-land.md M2)
+  ui.setToolCost('buy', world.market ? 'by value' : `$${LAND_PRICE_PER_TILE}/tile`);
   // a read-only showcase (SPECTATE): only looking; the tool bar, the tech chip, Reset demo and the menu's changes go (style.css body.spectate)
   world.spectate = !!m.spectate;
   document.body.classList.toggle('spectate', world.spectate);
@@ -425,6 +427,7 @@ ui.onGoto = (x, y) => flyTo(x, y);
 setInterval(() => { if (ui.deceasedFor && net.connected) net.send({ t: 'inspectDeceased', id: ui.deceasedFor }); }, 2000);
 net.on('problems', (m) => problems.set(m.p, m.r));
 net.on('overlay', (m) => world.applyOverlay(m.ch, m.cx, m.cy, m.d));
+net.on('landPrice', (m) => world.applyLandPrice(m.cx, m.cy, m.d));
 const problems = new ProblemsPanel({
   world,
   flyTo: (x, y) => flyTo(x, y),
@@ -756,7 +759,7 @@ const input = new Input(canvas, rig, {
     placeMemo = null;
     updateStatus();
   },
-  onBuy: (r: Rect) => { net.send({ t: 'buy', ...r }); rectMesh.visible = false; },
+  onBuy: (r: Rect) => { net.send({ t: 'buy', ...r, ...(world.market ? { q: buyCost(r).cost } : {}) }); rectMesh.visible = false; },
   onContext: (px, py, cx, cy) => {
     if (lines.undoStop()) return; // editing a bus line: a right-click takes the last stop off
     // right-click (not a drag): the menu of whatever is under the cursor, agents first like a left click
@@ -950,6 +953,7 @@ const ctxMenu = new ContextMenu({
   focus: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(rig.dist, 30); },
   openLines: () => lines.toggle(true),
   buyVerdict,
+  buyCost,
   onOpen: () => { clearTimeout(tipTimer); clearInterval(tipRefresh); tipTile = null; tipAgent = 0; ui.hideTip(); },
 });
 
@@ -1160,9 +1164,18 @@ function buyVerdict(r: Rect) {
     ownerAt: (x, y) => world.parcelAt(x, y)?.owner ?? null,
     isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; },
     ownerName: (id) => world.players.get(id)?.name ?? id,
-  });
+  }, world.market ? { outposts: true, outpostMin: LAND_TUNING.outpostMin } : undefined);
   buyMemo = { key: k, at: now, v };
   return v;
+}
+/**
+ * What a rectangle costs me, as the server works it out: the flat price, or under the market rules the land's value
+ * (shared/src/land.ts, from the `landPrice` bytes) less the free homestead on a first purchase.
+ */
+function buyCost(r: Rect): { cost: number; price: number; homestead?: number } {
+  if (!world.market) { const price = r.w * r.h * LAND_PRICE_PER_TILE; return { cost: price, price }; }
+  const price = world.landPrice(r), homestead = world.myPlayer?.homestead;
+  return { cost: landCost(r, price, homestead), price, ...(homestead ? { homestead } : {}) };
 }
 
 /**
@@ -1268,10 +1281,14 @@ function updateStatus() {
   }
   if (input.buyRect) {
     const r = input.buyRect, verdict = buyVerdict(r);
-    s = `${r.w}×${r.h} tiles = $${(r.w * r.h * LAND_PRICE_PER_TILE).toLocaleString()}`;
+    const bc = buyCost(r);
+    s = !world.market ? `${r.w}×${r.h} tiles = $${bc.cost.toLocaleString()}`
+      : bc.homestead && bc.cost === 0 ? `${r.w}×${r.h} tiles: your homestead, free (worth $${bc.price.toLocaleString()})`
+        : `${r.w}×${r.h} tiles = $${bc.cost.toLocaleString()} (about $${(bc.price / (r.w * r.h)).toFixed(2)} a tile by the neighbourhood's value${bc.homestead ? `; the first ${bc.homestead}×${bc.homestead} free` : ''})`;
     if (!verdict.ok) s += ` · ${verdict.reason}`;
     else if (world.myPlayer?.fin?.admin !== undefined) s += ' · in administration';
-    else if (world.myPlayer && spendableMoney(world.myPlayer.money, world.myPlayer.devUnlimited) < r.w * r.h * LAND_PRICE_PER_TILE) s += ' · not enough money, even with the overdraft';
+    else if (world.myPlayer && spendableMoney(world.myPlayer.money, world.myPlayer.devUnlimited) < bc.cost) s += ' · not enough money, even with the overdraft';
+    else if (world.market) s += ` · empty land pays ${Math.round(LAND_TUNING.emptyTax * 100)}% of its price a day until something is built on it`;
   }
   ui.setStatus(s);
 }
@@ -1553,7 +1570,7 @@ function frame(now: number) {
     rectMesh.scale.set(r.w, 1, r.h);
     rectMesh.position.set(r.x + r.w / 2, 0.05, r.y + r.h / 2);
     const me = world.myPlayer;
-    const okBuy = !!me && me.fin?.admin === undefined && spendableMoney(me.money, me.devUnlimited) >= r.w * r.h * LAND_PRICE_PER_TILE && buyVerdict(r).ok;
+    const okBuy = !!me && me.fin?.admin === undefined && spendableMoney(me.money, me.devUnlimited) >= buyCost(r).cost && buyVerdict(r).ok;
     const rm = rectMesh.material as MeshBasicMaterial;
     rm.color.setHex(okBuy ? 0x62d2a2 : 0xff3b30);
     rm.opacity = okBuy ? 0.35 : 0.6; // a refused rectangle must read as red, not brown, over grass

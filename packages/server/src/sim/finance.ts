@@ -52,6 +52,9 @@ export class Finance {
   private day: number;
   /** each player's recovery plan, worked out at most once a game hour (or again after a recovery action) */
   private plans = new Map<string, { hour: number; plan: RecoveryPlanDTO }>();
+  /** a parcel's land at the market price (sim/land.ts, a shared world's market rules; set by game.ts); null: LAND_PRICE_PER_TILE a tile */
+  landPrice: ((q: Parcel) => number) | null = null;
+  private parcelPrice(q: Parcel) { return this.landPrice ? this.landPrice(q) : q.w * q.h * LAND_PRICE_PER_TILE; }
 
   constructor(private w: World, private sandbox: boolean) {
     this.day = w.day;
@@ -116,13 +119,14 @@ export class Finance {
     if (hit && hit.hour === hour) return hit.plan;
     const plan: RecoveryPlanDTO = { taxRate: T.recoveryTaxRate, taxParcels: 0, taxPerDay: 0, sellParcels: 0, sellTiles: 0, sellCash: 0, mothball: 0, mothballPerDay: 0, mothballed: 0 };
     const share = w.payrollShare(p.id);
+    let sellValue = 0;
     for (const q of w.parcels.values()) {
       if (q.owner !== p.id) continue;
       if (q.taxRate < T.recoveryTaxRate) {
         plan.taxParcels++;
         if (q.taxRate > 0) plan.taxPerDay += q.stats.taxYesterday * (T.recoveryTaxRate / q.taxRate - 1);
       }
-      if (this.sellable(q)) { plan.sellParcels++; plan.sellTiles += q.w * q.h; }
+      if (this.sellable(q)) { plan.sellParcels++; plan.sellTiles += q.w * q.h; sellValue += this.parcelPrice(q); }
       for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) {
         const b = w.buildings.get(tileKey(x, y));
         if (!b || !mothballable(b)) continue;
@@ -134,7 +138,7 @@ export class Finance {
     }
     plan.taxPerDay = Math.round(plan.taxPerDay);
     plan.mothballPerDay = Math.round(plan.mothballPerDay);
-    plan.sellCash = Math.round(plan.sellTiles * LAND_PRICE_PER_TILE * T.landBuyback);
+    plan.sellCash = Math.round(sellValue * T.landBuyback);
     this.plans.set(p.id, { hour, plan });
     return plan;
   }
@@ -179,9 +183,10 @@ export class Finance {
   /** Every empty parcel of the player's goes back to the region: roads on it are taken up, the tiles become unclaimed. */
   private sellLand(p: Player) {
     const w = this.w;
-    let n = 0, tiles = 0;
+    let n = 0, tiles = 0, value = 0;
     for (const q of [...w.parcels.values()]) {
       if (q.owner !== p.id || !this.sellable(q)) continue;
+      value += this.parcelPrice(q);
       if (q.group !== undefined) w.leaveEstate(q.id, () => true);
       for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) {
         const t = w.peekTile(x, y);
@@ -193,7 +198,7 @@ export class Finance {
       tiles += q.w * q.h; n++;
     }
     if (!n) return { ok: false, msg: 'No land to sell back: every parcel of yours has something built or being built on it' };
-    const cash = Math.round(tiles * LAND_PRICE_PER_TILE * ECONOMY_TUNING.landBuyback);
+    const cash = Math.round(value * ECONOMY_TUNING.landBuyback);
     w.credit(p.id, cash, 'land');
     return { ok: true, msg: `Sold ${plural(n, 'empty parcel')} (${tiles} tiles) back to the region for ${money(cash)}` };
   }

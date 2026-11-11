@@ -132,9 +132,18 @@ export interface BotFResult {
 export async function playF(game: Game, accept: (c: Conn) => void, minutes = 180, log?: (min: number, what: string) => void, opts: { power?: boolean; sample?: (min: number) => void } = {}): Promise<BotFResult> {
   return play(new LocalBot(game, accept, 'Gauntlet'), minutes, log, opts.power ?? true, opts.sample);
 }
+/**
+ * Bot F on a shared world with the market rules (docs/multiplayer-land.md M2, loadtest/landbot.ts): it joins beside the
+ * Commons, takes its free 16×16 homestead with its first block at `x0` (west edge against the Commons' east edge road,
+ * so its streets join the town's), and buys each later block's land as it needs it (only the rows it does not own yet).
+ * Blocks west of `x0` are left out (the Commons is there). Everything else is bot F's.
+ */
+export async function playMarket(game: Game, accept: (c: Conn) => void, x0: number, minutes = 180, log?: (min: number, what: string) => void, name = 'Homesteader'): Promise<BotFResult> {
+  return play(new LocalBot(game, accept, name), minutes, log, true, undefined, x0);
+}
 
 /** `withPower` false: the bot as before utilities (no Electrification, no substations), the baseline loadtest/utilities-ranks.ts compares against */
-async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void, withPower = true, sample?: (min: number) => void): Promise<BotFResult> {
+async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void, withPower = true, sample?: (min: number) => void, marketX0?: number): Promise<BotFResult> {
   b.sub(-3, -3, 3, 3);
   await b.sleep(1500);
   const T0 = b.day + b.dayFrac;
@@ -153,7 +162,8 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   const money = () => b.me.money as number;
 
   // ---- layout: blocks of 16×9 (Z R Z Z R Z Z R Z) off the road end at welcome.home
-  const X0 = b.home?.[0] ?? -10, W = 16;
+  const market = marketX0 !== undefined;
+  const X0 = marketX0 ?? b.home?.[0] ?? -10, W = 16;
   interface Block { x0: number; y0: number; bought: boolean; rows: { y: number; zone: string | null }[]; roadRows: number[] }
   const mkBlock = (y0: number, x0 = X0): Block => {
     const rel = ['Z', 'R', 'Z', 'Z', 'R', 'Z', 'Z', 'R', 'Z'];
@@ -162,7 +172,8 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   const blocks: Block[] = [mkBlock(-3), mkBlock(6), mkBlock(-12), mkBlock(15), mkBlock(-21),
     mkBlock(6, X0 - W), mkBlock(-12, X0 - W), mkBlock(15, X0 - W), mkBlock(-21, X0 - W),
     mkBlock(-3, X0 + W), mkBlock(6, X0 + W), mkBlock(-12, X0 + W), mkBlock(15, X0 + W), mkBlock(-21, X0 + W), mkBlock(-30), mkBlock(-30, X0 + W),
-    mkBlock(-3, X0 + 2 * W), mkBlock(6, X0 + 2 * W), mkBlock(-12, X0 + 2 * W), mkBlock(15, X0 + 2 * W), mkBlock(-21, X0 + 2 * W), mkBlock(24), mkBlock(24, X0 + W)];
+    mkBlock(-3, X0 + 2 * W), mkBlock(6, X0 + 2 * W), mkBlock(-12, X0 + 2 * W), mkBlock(15, X0 + 2 * W), mkBlock(-21, X0 + 2 * W), mkBlock(24), mkBlock(24, X0 + W)]
+    .filter((k) => !market || k.x0 >= X0); // the market bot: the Commons is west of X0
   const allMine = (x: number, y: number, w: number, h: number) => {
     const own = new Map(b.parcels.map((p) => [p.id, p.owner]));
     for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (own.get(b.parcelId(i, j)) !== b.you) return false;
@@ -171,6 +182,16 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   let nextBlock = 0;
   async function buyBlock() {
     const blk = blocks[nextBlock];
+    if (blk && market && !allMine(blk.x0, blk.y0, W, 9)) {
+      // the market rules: the homestead first (16×16 from the first block's corner), then the rows of each block not yet owned
+      const rows: number[] = [];
+      for (let y = blk.y0; y < blk.y0 + 9; y++) if (!allMine(blk.x0, y, W, 1)) rows.push(y);
+      const y0 = Math.min(...rows), h = Math.max(...rows) - y0 + 1, first = !b.parcels.some((p) => p.owner === b.you);
+      const before = b.money;
+      b.buy(blk.x0, y0, W, first ? Math.max(h, W) : h);
+      await b.sleep(400);
+      note(`bought ${W}×${first ? Math.max(h, W) : h} at (${blk.x0}, ${y0}) for $${Math.round(before - b.money)}`);
+    }
     if (!blk || !allMine(blk.x0, blk.y0, W, 9)) return false; // a frontier's land comes with rank: wait for the ring
     blk.bought = true; nextBlock++;
     const tiles: [number, number][] = [];

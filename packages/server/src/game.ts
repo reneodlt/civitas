@@ -7,6 +7,7 @@ import { Metro } from './sim/metro';
 import { Ferry } from './sim/ferry';
 import { Harbours } from './sim/harbours';
 import { Finance } from './sim/finance';
+import { LandMarket } from './sim/land';
 import { Issues } from './sim/issues';
 import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
@@ -40,6 +41,8 @@ export interface Game {
   harbours: Harbours;
   /** the overdraft, administration and the recovery plan (sim/finance.ts): interest and the count at midnight */
   finance: Finance;
+  /** land and money on a shared world (sim/land.ts, docs/multiplayer-land.md M2): prices by value, the empty-land tax, abandoned land */
+  land: LandMarket;
   /** issue bubbles and the problems list (sim/issues.ts): a slice of the buildings looked at each tick */
   issues: Issues;
   /** house fires and the engines sent to them (sim/fires.ts) */
@@ -96,6 +99,10 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const finance = new Finance(world, cfg.sandbox);
   const net = new Net(world, sim, source, cfg);
   net.finance = finance;
+  // the market rules (docs/multiplayer-land.md M2): asked for by the host, never on a frontier, a sandbox or a showcase
+  const land = new LandMarket(world, sim.value, !!cfg.market && !cfg.sandbox && !cfg.spectate && world.start !== 'frontier');
+  net.land = land;
+  if (land.market) finance.landPrice = (q) => land.priceOf(q);
   net.harbours = harbours;
   net.airports = airports;
   net.rail = rail;
@@ -137,9 +144,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const perf = sim.perf;
   net.perf = perf;
-  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); land.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, land, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
     step() {
       const t0 = performance.now();
       sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');

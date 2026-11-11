@@ -484,3 +484,102 @@ Step 1 only: value steers who moves where and how tall a neighbourhood grows. No
   not an extra share smeared over the whole parcel.
 - Overlay chunks go as per-tile bytes on the existing overlay message (4x4 cells expanded), not a new cell-byte message.
 - Depot use is today and yesterday averaged, so a depot's smell fades over a weekend without collections.
+
+## Built: M2 land and money (2026-11-11)
+
+Section 3's decisions 1-3 and abandoned land, on a **shared world** only. Code: `shared/src/land.ts` (prices, browser-safe),
+`shared/src/landrules.ts` (outposts), `LAND_TUNING` in `shared/src/tuning.ts`, `server/src/sim/land.ts` (`LandMarket`,
+one per game: the price cache, the tax, abandoned land), `server/src/net.ts` (start, homestead, buy, the `landPrice`
+message, presence), the client's buy preview (`client/src/main.ts` `buyCost`, `world.ts` `landPrices`). Check:
+`npm run land:check` (`server/src/land-check.ts`). Bot: `server/src/loadtest/landbot.ts` (bot F's moves on a shared world,
+`loadtest/botf.ts` `playMarket`).
+
+**Where it applies.** `GameConfig.market`, set by `index.ts` on the live server (not a test city, demo or showcase;
+`LAND=classic` turns it off); `createGame` also refuses it on a frontier, a sandbox or a showcase. Frontier starts keep
+`FRONTIER_MONEY` and the charter, local mode (no `market`) keeps `START_MONEY`, the flat `LAND_PRICE_PER_TILE` and
+"must share an edge"; their tuning is untouched. The welcome carries `land: 'market'` so the client plays the same rules.
+Existing players keep what they have; only players made after the switch get the homestead and the small start.
+
+**Start and homestead.** A new player on a shared world gets `LAND_TUNING.startMoney` ($3,000) and `Player.homestead`
+(16, saved, in the player DTO). The homestead is the **first purchase**, anywhere legal: free when it fits in 16×16; a
+bigger first purchase pays for the tiles beyond 256 (its price × (area − 256) / area). The first plot, like an outpost,
+must be at least 8×8 (otherwise a fresh account could drop free one-tile spite strips). The parcel is named "<name>'s
+homestead".
+
+**Prices.** A tile's price is `base` × exp(`gain` × (land value − 1)), clamped to [$1, $40] (base $1.50, gain 4). The land
+value is the published value's formula (`combineValue`, the average household) **without the green and quiet terms**:
+with them, open country (green and quiet at full) scored 1.61 against 1.41 at the median home of a test city, so the wilds
+would have been the dearest land. Without them open country and anywhere with nothing near is 1 (the base price), a
+test city's homes are 0.77 / 1.09 / 1.27 (p10 / median / p90; at most 1.44), and nuisances take it down. The exponential
+curve turns that narrow spread into $1.50 in the wild, about $2.20 at the median home and $7.40 at 1.4; in land:check's
+Commons world the dearest 8×8 is 3.9× the wild price. Each cell's price travels as one byte on a log scale between $1 and
+$40 (about 1.5% a step): `landPriceBytes` makes a chunk's 64 bytes from its value-field bytes, and `landPriceOf` sums a
+rectangle's tiles from those bytes alone, so the server's charge and the client's preview come from identical numbers
+(water tiles are priced like land, as before). Chunks with no field are the wild price.
+
+**On the wire.** `{ t: 'landPrice', cx, cy, d }` (base64 of the 64 bytes, '' for the wild price) goes to a client for each
+chunk it subscribes to and again after an hourly value pass when a subscribed chunk's bytes changed (Net keeps what each
+client last got; `LandMarket` caches the bytes per value-field version). A buy carries the price the client showed
+(`q`); a server price above it is refused ("The price of that land has just changed to $…"), so a pass landing between
+the preview and the click never charges more than was shown. The buy tool's chip reads "by value"; the status line
+shows the cost, about a tile, "your homestead, free (worth $…)", and the empty-land tax.
+
+**Outposts.** With `rules.outposts` `checkPurchase` drops "must share an edge"; a purchase that shares no edge with your
+land must be at least `outpostMin` (8) a side. The walling-in check stays as it was, but its search box is the bounding
+box of the holdings joined to the new rectangle (sharing an edge or a corner, through each other), since only those can
+close a wall: a far outpost does not stretch the search over the country between.
+
+**The empty-land tax.** At midnight (`LandMarket.midnight`, after the day rolls) each owner pays `emptyTax` (2%) of the
+current price of every owned dry tile with nothing on it (no road, zone, building, track, structure or tunnel), ledger
+line `landtax` "Empty-land tax", a running cost. An empty 16×16 homestead in the wild pays about $7.70 a day; a road and
+a zoned row on it take that down tile for tile. The Commons and dev-funded players pay nothing.
+
+**Presence.** `Player.seen` (saved): the tick the player was last connected, set on joining and once a game hour for
+every connected player. A save from before M2 starts its clock at the first midnight. The tax pauses once a player has
+been away `awayPauseDays` (3).
+
+**Abandoned land.** At midnight, an owner away `abandonEmptyDays` (30) loses every parcel with no building on it (roads
+and empty zoned lots at most; nothing being built, no structure, track or tunnel): its zoning is cleared, its roads stay
+as public road, adopted (nobody pays, they fade if unused, M3), the tiles are unclaimed again and the owner's treasury is
+paid the parcel's current price (`land` line). After `abandonBuiltDays` (60) every other parcel goes to the Commons
+(`sys`, when the world has one) at its current land price, buildings and all, unpaid for. 0 turns that off. The owner
+is told by a toast if connected (they normally are not).
+
+**Selling back.** The recovery plan's "sell land back" (`sim/finance.ts`) now pays `landBuyback` of the market price on
+a shared world (`Finance.landPrice`, set by game.ts), not of $10 a tile: otherwise land bought at $1.50 sold back at $8.
+
+**Measured: the homesteader bot** (`landbot.ts`: bot F's opening, rows and technology choices; homestead against the
+Commons' east edge road, later blocks bought row by row; 10 ticks a loop as at SIM_STEPS=10; 120 minutes =
+15 game days):
+
+| start | seed | treasury low | Hamlet | Village | residents at 2 h | land bought | empty-land tax |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| $3,000 + homestead | 1 | −$399 (min 120) | 67 min | | 478 | $555 | $28 |
+| $3,000 + homestead | 2 | −$78 (min 1) | 59 min | | 396 | $196 | $31 |
+| $4,000 + homestead | 1 | −$51 (min 77) | 21.5 min | | 532 | $210 | $33 |
+| $4,000 + homestead | 2 | −$372 (min 85) | 28 min | 86 min | 520 | $670 | $66 |
+| $5,000 + homestead | 1 | −$274 (min 107) | 21.5 min | | 639 | $501 | $37 |
+| $5,000 + homestead | 2 | −$191 (min 101) | 28 min | 89 min | 700 | $539 | $44 |
+| classic $20,000, $10 a tile | 1 | $574 (min 92) | 27 min | 94 min | 704 | $7,200 | |
+| classic $20,000, $10 a tile | 2 | $458 (min 70) | 28 min | 77 min | 797 | $7,200 | |
+
+With $3,000 the bot spends its start in the first minute (the homestead's street and three rows of homes, about $2,500)
+and then sits at $250-$900 for about eight game days until taxes and the Hamlet grant let it buy technology: it never
+goes into administration (its low points are the overdraft for a block's road, paid back within the hour), but it reaches
+Hamlet 30-40 minutes later than a classic start and has about 40% fewer residents at two hours. At $4,000 it keeps
+classic's Hamlet time; at $5,000 also its residents. Land itself is cheap (a few hundred dollars against $7,200), and
+the empty-land tax on a builder's land is small ($30-70 over 15 days); it bites only on held empty land. `startMoney`
+stays at the decided $3,000; $4,000 is the number to try if new players should keep the classic pace.
+
+**Differences from the design.**
+
+- The land value leaves out green and quiet (above); "base × the land value averaged over the rectangle" is a sum of
+  per-tile prices on an exponential curve, not a linear multiple, so the spread is wide enough to matter.
+- The homestead is the first purchase (up to 16×16, at least 8×8), not a plot handed out at a fixed site: a shared world
+  has no single road end to put it at.
+- Abandoned built land goes to the Commons rather than to a market: there is no land market until M7. It is a tunable
+  hook (`abandonBuiltDays`, 0 = off); buildings, lines and vehicles of the old owner are not otherwise touched, and
+  nothing yet tells a returning owner beyond the ledger.
+- A free homestead per new account makes new accounts worth something; sign-in (docs/accounts.md) is the guard, and
+  abandonment returns unused homesteads after 30 days.
+- Self-assessed prices stay held back (decision 4).
