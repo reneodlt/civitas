@@ -1,5 +1,7 @@
 import { DirectionalLight, HemisphereLight, Color, Scene, Vector3 } from 'three';
 import { sceneUniforms } from './materials';
+import { Celestial } from './celestial';
+import { sunAt, sunDeclination } from '@msimcity/shared';
 
 const DAY_SKY = new Color(0x9fc4e8), DUSK_SKY = new Color(0xe09a66), BLUE_HOUR = new Color(0x2c3f72), NIGHT_SKY = new Color(0x0c1428);
 const SUN_WARM = new Color(0xffa95c), SUN_WHITE = new Color(0xfff3e0), MOON = new Color(0x7f93d0);
@@ -8,6 +10,9 @@ const HEMI_DAY_SKY = new Color(0xbfd9ff), HEMI_DAY_GROUND = new Color(0x5a6b45);
 const HEMI_NIGHT_SKY = new Color(0x34467a), HEMI_NIGHT_GROUND = new Color(0x1c2233);
 
 const UP = new Vector3(0, 1, 0);
+/** a year phase with 12 hours of day (thumbnails and anything without a clock) */
+const EQUINOX = equinoxPhase();
+function equinoxPhase() { let best = 0, bd = Infinity; for (let p = 0; p < 0.5; p += 0.001) { const d = Math.abs(sunDeclination(p)); if (d < bd) { bd = d; best = p; } } return best; }
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /**
@@ -28,8 +33,11 @@ export class Lighting {
   private lr = new Vector3();
   private lu = new Vector3();
   private tmp = new Color();
+  /** the sun and moon drawn in the sky, along this light's direction (only for the main view: thumbnails leave it out) */
+  readonly celestial: Celestial | null;
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, opts: { sky?: boolean } = {}) {
+    this.celestial = opts.sky ? new Celestial(scene) : null;
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.setQuality(2);
@@ -51,17 +59,24 @@ export class Lighting {
     }
   }
 
-  update(liveHour: number, target: Vector3, dist: number) {
+  /**
+   * `yearPhase` is the day of the year (shared seasonOf(tick).phase): the sun's path follows the season (shared sunAt),
+   * so winter days are short with a low sun and long shadows, and summer days long with a high one. Left out, the
+   * equinox (12 hours of day).
+   */
+  update(liveHour: number, target: Vector3, dist: number, gameDay = 0, yearPhase = EQUINOX) {
     const h = this.mode === 'live' ? liveHour : this.fixedHour;
     this.hour = h;
-    const theta = (h / 24) * Math.PI * 2 - Math.PI / 2; // 6:00 east horizon, 12:00 overhead, 18:00 west
-    const elev = Math.sin(theta);
+    const s = sunAt(yearPhase, h);
+    const elev = s.elev;
     const day = smooth(-0.22, 0.16, elev);
     const dusk = Math.exp(-((elev / 0.2) ** 2)) * 0.8;
     const blue = Math.exp(-(((elev + 0.15) / 0.09) ** 2)); // blue hour after the orange has gone
 
-    const dir = elev >= 0 ? new Vector3(Math.cos(theta), Math.max(elev, 0.05), 0.45) : new Vector3(-Math.cos(theta), Math.max(-elev, 0.1), 0.45);
+    // the light comes from the sun by day and from the moon (opposite it) by night, never quite grazing the ground
+    const dir = elev >= 0 ? new Vector3(s.x, Math.max(elev, 0.05), s.z) : new Vector3(-s.x, Math.max(-elev, 0.1), -s.z);
     dir.normalize();
+    this.celestial?.update(s, gameDay);
     // the shadow camera moves in whole texels of its own map as the view pans (in the light's axes), so a shadow's edge stays
     // on the same texels instead of crawling and shimmering over lit surfaces; the light's direction is unchanged
     const texel = this.extent > 0 ? (2 * this.extent) / this.sun.shadow.mapSize.x : 0;

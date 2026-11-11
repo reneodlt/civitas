@@ -327,3 +327,34 @@ export function dayForecast(seed: number, day: number): DayForecast {
   else sky = 'Sunny spells';
   return { sky, wet: wet >= 3, hi: Math.round(hi), lo: Math.round(lo), wind: Math.round(sp * 1.8), windFrom: fromName(sx, sy) };
 }
+
+// ---- the sun's path ----------------------------------------------------------------------------------------------
+
+/**
+ * The world's latitude for the sun's path, chosen so the longest day is 12 + 4 hours as `Weather.daylight` has it
+ * (cos H0 = -tan(lat) tan(23.44°) = cos(120°)): about 49° north, the latitude of northern France.
+ */
+const TILT = (23.44 * Math.PI) / 180;
+const LAT = Math.atan(0.5 / Math.tan(TILT));
+
+/** The sun's declination for a year phase, solved so the day length is exactly `Weather.daylight`'s. */
+export function sunDeclination(phase: number): number {
+  const len = 12 + 4 * Math.cos(TAU * (phase - WARMEST));
+  const h0 = (len / 24) * Math.PI; // half the day, as an hour angle
+  return Math.atan(-Math.cos(h0) / Math.tan(LAT));
+}
+
+/**
+ * Where the sun is at `hour` (0-24, may be fractional) on a day of the year `phase` (seasonOf(tick).phase), as a unit
+ * vector from the ground towards it in world axes: `x` east, `y` up, `z` south (tile +y; the compass of this file's
+ * header). Noon is due south; it rises north of east in summer and south of east in winter, and stands about 64° up
+ * at midsummer noon, 41° at the equinoxes and 18° at midwinter. `elev` is the sine of its height (negative below the
+ * horizon).
+ */
+export function sunAt(phase: number, hour: number): { x: number; y: number; z: number; elev: number } {
+  const d = sunDeclination(phase), H = ((hour - 12) / 24) * TAU;
+  const east = -Math.cos(d) * Math.sin(H);
+  const north = Math.sin(d) * Math.cos(LAT) - Math.cos(d) * Math.cos(H) * Math.sin(LAT);
+  const up = Math.sin(d) * Math.sin(LAT) + Math.cos(d) * Math.cos(H) * Math.cos(LAT);
+  return { x: east, y: up, z: -north, elev: up };
+}

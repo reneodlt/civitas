@@ -2,7 +2,7 @@ import { JunctionTools, isJunctionTool } from './junctiontools';
 import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, seasonOf, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -92,7 +92,7 @@ renderer.toneMappingExposure = 1.05;
 
 const scene = new Scene();
 scene.fog = new Fog(0x9fc4e8, 120, 420);
-const lighting = new Lighting(scene);
+const lighting = new Lighting(scene, { sky: true });
 const rig = new CameraRig(1);
 const world = new ClientWorld();
 
@@ -1458,7 +1458,8 @@ function frame(now: number) {
   adaptQuality(dt);
 
   underground.frame(dt, renderer);
-  lighting.update(liveHour(), rig.target, rig.dist);
+  lighting.update(liveHour(), rig.target, rig.dist, Math.floor(liveTick() / TICKS_PER_DAY), seasonOf(liveTick()).phase);
+  if (lighting.celestial) lighting.celestial.visible = underground.level < 0.5;
   underground.look(lighting, renderer);
   scene.background = lighting.sky;
   const fog = scene.fog as Fog;
