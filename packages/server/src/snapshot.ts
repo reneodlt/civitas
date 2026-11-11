@@ -10,7 +10,7 @@ import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 import type { StreetsSave } from './streets';
 import type { RoadRuleDTO } from '@msimcity/shared';
-import type { LandDealsSave } from '@msimcity/shared';
+import type { LandDealsSave, ContractsSave } from '@msimcity/shared';
 
 /**
  * v8: the per-chunk under layer (tunnels and platforms, docs/underground.md), stored only where it is not all zero,
@@ -74,6 +74,11 @@ export interface Snapshot {
    * optional, absent in older saves and while there are none (covenants are on the parcels, `Parcel.cov`)
    */
   landDeals?: LandDealsSave;
+  /**
+   * service contracts (docs/multiplayer-land.md M8, sim/contracts.ts): posted tariffs and running contracts; optional,
+   * absent in older saves and while there are none
+   */
+  contracts?: ContractsSave;
   /** planning applications, refused designs and approved conditions (sim/planning.ts PlanningSave, docs/multiplayer-land.md M5); optional, absent in older saves and while there are none */
   planning?: object;
 }
@@ -116,6 +121,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.deathSave ? deathField(w.deathSave()) : {}),
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
     ...(w.landDealsSave ? landDealsField(w.landDealsSave()) : {}),
+    ...(w.contractsSave ? contractsField(w.contractsSave()) : {}),
     ...(w.planningSave ? planningField(w.planningSave()) : {}),
   };
 }
@@ -133,6 +139,8 @@ const utilitiesField = (u: UtilitiesSave | null) => (u ? { utilities: u } : {});
 
 /** The land market field, left out while there are no deals (so a save without them is as before). */
 const landDealsField = (d: LandDealsSave | null) => (d ? { landDeals: d } : {});
+/** The service contracts field, left out while there are no tariffs or contracts (so a save without them is as before). */
+const contractsField = (c: ContractsSave | null) => (c ? { contracts: c } : {});
 /** The planning field, left out while there is nothing to keep (so a save without planning is as before). */
 const planningField = (p: object | null) => (p ? { planning: p } : {});
 
@@ -199,6 +207,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.death && typeof snap.death === 'object') w.deathLoaded = snap.death;
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
   if (snap.landDeals && typeof snap.landDeals === 'object') w.landDealsLoaded = snap.landDeals;
+  if (snap.contracts && typeof snap.contracts === 'object') w.contractsLoaded = snap.contracts;
   if (snap.planning && typeof snap.planning === 'object') w.planningLoaded = snap.planning;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {

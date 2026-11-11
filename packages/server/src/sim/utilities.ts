@@ -40,8 +40,21 @@ export interface PowerHour {
   /** homes on a substation's streets; of them, dark (a cut, a fault, no supply) and dimmed (a brownout) */
   homes: number; dark: number; brown: number;
 }
-/** What a building drew this hour and from which node (index into the field). */
-interface Draw { node: number; units: number }
+/** What a building drew this hour and from which node (index into the field); `contract`: a provider's node under that power contract (M8). */
+interface Draw { node: number; units: number; contract?: number }
+
+/**
+ * Service contracts (sim/contracts.ts, docs/multiplayer-land.md M8), as the utilities see them: a buyer's parcel under a
+ * power contract is served by the provider's network, whose reach may walk the buyer's roads for power only.
+ */
+export interface PowerContracts {
+  /** the power contract running on parcel `id` (0: none): its id and provider */
+  providerOf(parcel: number): { id: number; provider: string } | null;
+  /** whether `owner`'s network may walk the road at (x, y), on another player's parcel under a power contract with them */
+  access(owner: string, x: number, y: number): boolean;
+  /** units supplied this hour under each contract (contract id -> units), billed at the contract's price */
+  supplied(units: Map<number, number>): void;
+}
 
 /**
  * Utilities on the server (docs/utilities.md): power in phase 1. It keeps the reach field fresh (shared UtilityField,
@@ -102,11 +115,14 @@ export class Utilities implements FleetService {
   hourly = new Map<string, PowerHour>();
   stats = { solves: 0, rebuilds: 0, faults: 0, repaired: 0, byVan: 0, byContractor: 0, vansSent: 0, unreachable: 0, bills: 0, fuel: 0, imported: 0, cutHours: 0, brownHours: 0, held: 0, solveMs: 0 };
   readonly env: UtilEnv;
+  /** service contracts (M8, sim/contracts.ts; set by game.ts): power to buyers' parcels over their roads */
+  contracts: PowerContracts | null = null;
 
   constructor(private w: World, private mobile: Mobile) {
     this.env = {
       tile: (x, y) => w.peekTile(x, y), sub: (x, y) => w.subAt(x, y), aux: (x, y) => w.auxAt(x, y),
       owner: (x, y) => w.parcelAt(x, y)?.owner ?? null,
+      access: (o, x, y) => this.contracts !== null && this.contracts.access(o, x, y),
     };
     mobile.register(this);
     const prev = w.onTileChanged;
@@ -159,7 +175,21 @@ export class Utilities implements FleetService {
   invalidate() { this.dirty = true; }
 
   /** The field index of the node serving building b, or -1. */
-  private servingOf(b: Building, owner: string) { return this.field.serving(owner, b.x, b.y); }
+  private servingOf(b: Building, owner: string) { return this.serve(b, owner).n; }
+  /**
+   * The node serving building b (field index, -1 none) and the power contract it is served under (0: its owner's own):
+   * a parcel under a power contract (M8) is served by the provider's network where it reaches, else by its owner's own.
+   */
+  private serve(b: Building, owner: string): { n: number; contract: number } {
+    const c = this.contracts?.providerOf(this.w.parcelIdAt(b.x, b.y) ?? 0);
+    if (c) { const n = this.field.serving(c.provider, b.x, b.y); if (n >= 0) return { n, contract: c.id }; }
+    return { n: this.field.serving(owner, b.x, b.y), contract: 0 };
+  }
+  /** Whether the node with door key `key` served a building under a power contract at the last solve (M8: not to be cut). */
+  servesContract(key: number): boolean {
+    for (const d of this.draws.values()) if (d.contract && this.field.nodes[d.node]?.key === key) return true;
+    return false;
+  }
 
   // ---- the hourly solve --------------------------------------------------------------------------------------------
 
@@ -190,13 +220,13 @@ export class Utilities implements FleetService {
       if (b.level <= 0 || UTIL_ROLE_OF[b.id]) continue;
       const owner = w.parcelAt(b.x, b.y)?.owner;
       if (!owner) continue;
-      const n = this.servingOf(b, owner);
+      const { n, contract } = this.serve(b, owner);
       if (n < 0) continue;
       const units = powerDemand(b.zone, b.level, b.occupants + (b.lodgers ?? 0), capacityOf(b.id, b.level), hour) * wmul;
       demand[n] += units;
       if (b.zone !== Zone.Residential) work[n] += units;
       if (b.zone === Zone.Hospital || b.zone === Zone.Police) never[n] = 1;
-      this.draws.set(b, { node: n, units });
+      this.draws.set(b, contract ? { node: n, units, contract } : { node: n, units });
     }
     if (lamps > 0) for (let i = 0; i < N; i++) { const u = lamps * (this.field.served[i] ?? 0); demand[i] += u; this.weatherHour.lighting += u; }
     // networks: nodes joined by touching reach and by links, plants joined to the node whose reach takes in their door
@@ -276,7 +306,9 @@ export class Utilities implements FleetService {
       if (r.imported > 0) { add(fuel, owner, r.imported * UTIL.importPrice); this.stats.imported += r.imported; }
       for (const s of r.state) { if (s === UtilState.Cut) this.stats.cutHours++; else if (s === UtilState.Brown) this.stats.brownHours++; }
     }
-    // bills: every supplied building pays its units at the owner's tariff
+    // bills: every supplied building pays its units at the owner's tariff; units under a power contract (M8) are billed
+    // to the building's owner at the contract's price as well (sim/contracts.ts), for what was supplied only
+    const underContract = new Map<number, number>();
     for (const [b, d] of this.draws) {
       const s = this.nodeState.get(nodes[d.node].key)?.state;
       if (b.zone === Zone.Residential) {
@@ -284,11 +316,13 @@ export class Utilities implements FleetService {
         if (o) { const h = hourOf(o); h.homes++; if (s === UtilState.Brown) h.brown++; else if (s !== UtilState.Ok) h.dark++; }
       }
       if (s !== UtilState.Ok && s !== UtilState.Brown) continue;
+      if (d.contract) underContract.set(d.contract, (underContract.get(d.contract) ?? 0) + d.units);
       const owner = w.parcelAt(b.x, b.y)?.owner;
       if (owner) add(bills, owner, d.units * UTIL.tariff * (this.tariff.get(owner) ?? 1));
     }
     for (const [owner, v] of bills) if (v > 0) { w.credit(owner, v, 'bills'); this.stats.bills += v; }
     for (const [owner, v] of fuel) if (v > 0) { w.credit(owner, -v, 'fuel'); this.stats.fuel += v; }
+    if (underContract.size) this.contracts?.supplied(underContract);
     // a node going dark tells its owner, once a game hour at most
     for (const [key, st] of this.nodeState) {
       const was = prevState.get(key)?.state;
@@ -566,7 +600,7 @@ export class Utilities implements FleetService {
     const node = this.field.nodes[n], st = this.nodeState.get(node.key)?.state ?? UtilState.Unpowered;
     const units = d?.units ?? 0;
     let steps = 99;
-    for (let k = 0; k < 4; k++) { const x = b.x + DX[k], y = b.y + DY[k]; if (this.field.nodeIndexAt(owner, x, y) === n) steps = Math.min(steps, this.field.distAt(owner, x, y)); }
+    for (let k = 0; k < 4; k++) { const x = b.x + DX[k], y = b.y + DY[k]; if (this.field.nodeIndexAt(node.owner, x, y) === n) steps = Math.min(steps, this.field.distAt(node.owner, x, y)); }
     const f = st === UtilState.Fault ? [...this.faults.values()].find((q) => q.kind === 'node' && q.ref === node.key) : undefined;
     return { power: { state: st, node: [node.x, node.y], nodeKind: node.kind, steps, units, bill: units * UTIL.tariff * (this.tariff.get(owner) ?? 1), needed, ...(f ? { repair: this.advice(f) } : {}) } };
   }

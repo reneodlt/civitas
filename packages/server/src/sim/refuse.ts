@@ -14,6 +14,16 @@ const SHARE_KERB = 3;
 /** sweepers: a waypoint every so many road tiles of the district, at most this many a round */
 const SWEEP_STEP = 4, SWEEP_MAX = 12;
 
+/**
+ * Service contracts (sim/contracts.ts, docs/multiplayer-land.md M8), as the rounds see them: the refuse contract running
+ * on the parcel at (x, y), if any.
+ */
+export interface RefuseContracts {
+  providerAt(x: number, y: number): { id: number; provider: string } | null;
+}
+/** Who may collect a home: its owner's own sites, or under a contract only the provider's (null owner: public land). */
+interface Collector { owner: string | null; provider: string | null }
+
 /** One district's collection today: its kerbs still to visit, in order, and the homes behind each. */
 interface Round {
   id: number;
@@ -56,7 +66,9 @@ export class Refuse implements FleetService {
   /** homes given to each refuse site's rounds today (tkey of its door): a site takes no more than its capacity a day */
   private planned = new Map<number, number>();
   /** since start (loadtest/mobile.ts and refuse-check read these) */
-  stats = { rounds: 0, roundsDone: 0, homes: 0, homesDone: 0, lorries: 0, sweeps: 0, sweepsDone: 0, fees: 0, unserved: 0, levy: 0, sales: 0, tonnes: 0 };
+  stats = { rounds: 0, roundsDone: 0, homes: 0, homesDone: 0, lorries: 0, sweeps: 0, sweepsDone: 0, fees: 0, unserved: 0, levy: 0, sales: 0, tonnes: 0, contractHomes: 0, fallbackHomes: 0 };
+  /** service contracts (M8; set by game.ts): a contracted parcel's homes go to the provider's sites */
+  contracts: RefuseContracts | null = null;
 
   constructor(private w: World, private mobile: Mobile) {}
 
@@ -77,15 +89,31 @@ export class Refuse implements FleetService {
   /**
    * The depot for (x, y) within reach: the nearest refuse site with crews and room today for `homes` more, else the
    * nearest old waste depot with crews. A site already full takes a district only when nothing else is in reach.
+   * With `who` (M8), a player's site takes only its owner's homes, or under a refuse contract only its provider's
+   * buyers' (a site on public land or the Commons' takes anyone's, and so do the old depots, the regional service).
    */
-  private depotsNear(x: number, y: number, homes = 0): Building | null {
+  private depotsNear(x: number, y: number, homes = 0, who?: Collector): Building | null {
     const SITE = 1e5, FULL = 5e4;
     return this.w.bestBuiltNear(x, y, [Zone.Industrial, Zone.Hub], REFUSE.reach, SITE, (b, d) => {
       if (b.occupants <= 0 || !isRefuseDepot(b.id, b.x, b.y)) return null;
       if (!refuseGradeOf(b.id)) return -d;
+      if (who && !this.mayCollect(b, who)) return null;
       const room = refuseCapacity(b.id, this.w.refuseAddons.get(tileKey(b.x, b.y)) ?? 0) - (this.planned.get(tkey(b.x, b.y)) ?? 0);
       return room >= homes ? SITE - d : room > 0 ? FULL - d : null;
     }, (b) => this.w.hasRoadAccess(b.x, b.y));
+  }
+  /** Whether refuse site b may take homes of `who` (M8): its owner's own, public homes, or its owner's contracted buyers'. */
+  private mayCollect(b: Building, who: Collector): boolean {
+    const so = this.w.parcelAt(b.x, b.y)?.owner ?? null;
+    if (so === null || so === 'sys') return true;
+    if (who.provider) return so === who.provider;
+    return who.owner === null || who.owner === 'sys' || so === who.owner;
+  }
+  /** Who may collect the home at (x, y): its owner, and the provider of a refuse contract on its parcel (M8). */
+  private collectorAt(x: number, y: number): Collector {
+    const owner = this.w.parcelAt(x, y)?.owner ?? null;
+    const c = owner ? this.contracts?.providerAt(x, y) : null;
+    return { owner, provider: c?.provider ?? null };
   }
   /** Homes given to the rounds of the refuse site at (x, y) today (its panel). */
   plannedAt(x: number, y: number) { return this.planned.get(tkey(x, y)) ?? 0; }
@@ -104,26 +132,37 @@ export class Refuse implements FleetService {
       if (!l) byDistrict.set(k, l = []);
       l.push(b);
     }
-    for (const [k, homes] of byDistrict) {
-      const b0 = homes[0];
+    for (const [k, all] of byDistrict) {
+      const b0 = all[0];
       const due = binDay(b0.x, b0.y) === wd;
-      // the depot nearest the district's middle
-      let mx = 0, my = 0;
-      for (const b of homes) { mx += b.x; my += b.y; }
-      mx = Math.round(mx / homes.length); my = Math.round(my / homes.length);
-      const depot = this.depotsNear(mx, my, due ? homes.length : 0);
-      if (!depot) { if (due) this.stats.unserved += homes.length; continue; }
-      if (due) {
-        // a refuse site takes no more than its room today (homes past it wait for next week's round)
-        let take = homes;
-        if (refuseGradeOf(depot.id)) {
-          const dk = tkey(depot.x, depot.y), room = Math.max(0, refuseCapacity(depot.id, this.w.refuseAddons.get(tileKey(depot.x, depot.y)) ?? 0) - (this.planned.get(dk) ?? 0));
-          if (room < homes.length) { take = homes.slice(0, room); this.stats.unserved += homes.length - room; }
-          this.planned.set(dk, (this.planned.get(dk) ?? 0) + take.length);
-        }
-        if (take.length) this.planRound(k, [depot.x, depot.y], take);
+      // a district's homes by who may collect them (M8): each owner's own sites, a contract's provider's, the regional depots
+      const groups = new Map<string, { who: Collector; homes: Building[] }>();
+      if (!due) groups.set('', { who: { owner: null, provider: null }, homes: all }); // sweeping is the district's, whoever's site
+      else for (const b of all) {
+        const who = this.collectorAt(b.x, b.y), gk = who.provider ? `c:${who.provider}` : `o:${who.owner ?? ''}`;
+        let g = groups.get(gk);
+        if (!g) groups.set(gk, g = { who, homes: [] });
+        g.homes.push(b);
       }
-      else this.planSweep(k, [depot.x, depot.y], homes);
+      for (const { who, homes } of groups.values()) {
+        // the depot nearest the group's middle
+        let mx = 0, my = 0;
+        for (const b of homes) { mx += b.x; my += b.y; }
+        mx = Math.round(mx / homes.length); my = Math.round(my / homes.length);
+        const depot = this.depotsNear(mx, my, due ? homes.length : 0, due ? who : undefined);
+        if (!depot) { if (due) this.stats.unserved += homes.length; continue; }
+        if (due) {
+          // a refuse site takes no more than its room today (homes past it wait for next week's round)
+          let take = homes;
+          if (refuseGradeOf(depot.id)) {
+            const dk = tkey(depot.x, depot.y), room = Math.max(0, refuseCapacity(depot.id, this.w.refuseAddons.get(tileKey(depot.x, depot.y)) ?? 0) - (this.planned.get(dk) ?? 0));
+            if (room < homes.length) { take = homes.slice(0, room); this.stats.unserved += homes.length - room; }
+            this.planned.set(dk, (this.planned.get(dk) ?? 0) + take.length);
+          }
+          if (take.length) this.planRound(k, [depot.x, depot.y], take);
+        }
+        else this.planSweep(k, [depot.x, depot.y], homes);
+      }
     }
   }
   private planRound(district: number, depot: [number, number], homes: Building[]) {
@@ -245,7 +284,12 @@ export class Refuse implements FleetService {
       this.emptied.set(hk, tick);
       const [hx, hy] = untkey(hk);
       const owner = w.parcelAt(hx, hy)?.owner;
-      if (owner && depotOwner && owner !== depotOwner) w.transfer(owner, depotOwner, REFUSE.feePerHome, 'fees');
+      // M8: a home under a refuse contract is paid for by the contract (sim/contracts.ts, hourly) when the provider's site
+      // empties it; when the regional service had to (the provider's sites full or out of reach) the provider pays its fee
+      const c = owner ? this.contracts?.providerAt(hx, hy) : null;
+      if (c && c.provider === depotOwner) { this.stats.contractHomes++; continue; }
+      if (c) { if (depotOwner && depotOwner !== c.provider) w.transfer(c.provider, depotOwner, REFUSE.feePerHome, 'fees'); this.stats.fallbackHomes++; }
+      else if (owner && depotOwner && owner !== depotOwner) w.transfer(owner, depotOwner, REFUSE.feePerHome, 'fees');
       this.stats.fees += REFUSE.feePerHome;
     }
     const r = this.roundOf(s.ref);
@@ -348,7 +392,7 @@ export class Refuse implements FleetService {
     return {
       role: 'bins',
       rows: [
-        ['Collection day', `${WEEKDAY_NAMES[wd]}${this.depotsNear(bx, by) ? '' : ' (no depot in reach)'}`],
+        ['Collection day', `${WEEKDAY_NAMES[wd]}${this.depotsNear(bx, by, 0, this.collectorAt(bx, by)) ? '' : ' (no depot in reach)'}`],
         ['Last emptied', last === undefined ? 'not since the town was loaded' : lastDay === day ? `today, ${hhmm(last)}` : `${WEEKDAY_NAMES[((lastDay! % 7) + 7) % 7]} ${hhmm(last)}`],
       ],
     };

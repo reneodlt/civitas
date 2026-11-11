@@ -81,7 +81,11 @@ the same tiles (the `planPlatform` pattern), so **reach never goes on the wire**
 - The search starts from the road tiles beside a node's door and walks road tiles in a fixed order (east, west, south,
   north) up to `nodeRadius` steps (12 for a substation, 16 for a grid supply point).
 - It walks only roads on the node owner's own parcels and unowned (public) roads, never another player's streets.
-  Each player runs their own networks (answer 3).
+  Each player runs their own networks (answer 3). **The one exception (M8, built):** a parcel under a power contract
+  with the node's owner (docs/multiplayer-land.md "Built: M8"): `UtilEnv.access(owner, x, y)` lets the provider's
+  reach walk the buyer's roads there, for power only, and on to public roads beyond them but never onto a third
+  player's. A building on such a parcel is served by the provider's nearest node where it reaches (else by its owner's
+  own). The client does the same for the contracts its player is a party to (the `services` message).
 - A building is covered when a road tile beside its door is in a node's reach. Where two nodes of one owner reach the
   same road tile, the nearer one serves it, and on a tie the lower door key wins, so both sides agree.
 - `UtilityField` caches the result per chunk, per owner: for every road tile, the serving node and its distance.
@@ -154,6 +158,11 @@ A node cut, faulted or overloaded is off for the hour: its buildings have no pow
 - **Fuel and import are spending:** a new `LedgerCat` `'fuel'` for thermal plants' fuel per unit generated and grid
   import per unit imported.
 - Both count in the "days in the black" sum (`running`, server goals.ts), as taxes and wages do.
+- **Contracts (M8, built):** a building powered by another player's network under a power contract still pays its
+  owner's bill as above (the buyer collects from its residents); on top, the units supplied to it each hour are billed
+  to the buyer at the contract's price and paid to the provider (`services` and `contracts`, both running). Units not
+  supplied (a cut, a fault, no supply) are not billed. The provider's network pays the fuel and import for them, so at
+  the cap ($0.06, grid import) a provider importing breaks even and one generating earns.
 - Upkeep is per plant, node and depot, from the catalogue (`CIVIC_UPKEEP`), as for every civic building.
 
 ## 4. Electric (built in phase 1)
@@ -339,8 +348,9 @@ blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`
   and a world with none saves without the field.
 - **Local mode** stores the same snapshot, so it needs nothing (docs/local-mode.md).
 - **States on the wire:** 0 ok, 1 brownout, 2 cut, 3 fault, 4 unpowered (a node in a network with no supply).
-- **Contracts (hook):** `UtilitiesSave.contracts` and `ContractDTO` are declared and empty. A link crossing onto
-  another player's land is refused until contracts land (U9).
+- **Contracts:** built in M8 as their own snapshot field `contracts` (server sim/contracts.ts, covering refuse too);
+  `UtilitiesSave.contracts` and `ContractDTO`, the U9 hook, stay declared and empty. Trunk links still may not cross
+  another player's land: a contract carries supply along the buyer's streets, not over their fields.
 
 ## 6. The underground view (later, U7)
 
@@ -362,7 +372,8 @@ blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`
 | --- | --- | --- |
 | `UTIL_WEATHER.faultMul`, `windMul` | shared/src/utilities.ts | filled by docs/weather.md W4 (storm faults, wind output); W6 the big storms |
 | `pylonBlightAt(x, y, links)` | shared/src/utilities.ts | land value (bbe84771) |
-| `UtilitiesSave.contracts`, `ContractDTO` | shared/src/utilities.ts | selling to neighbours (U9) |
+| `UtilitiesSave.contracts`, `ContractDTO` | shared/src/utilities.ts | superseded by M8's `contracts` field (sim/contracts.ts) |
+| `UtilEnv.access`, `Utilities.contracts` (`PowerContracts`) | shared and server utilities.ts | M8 power contracts: reach over a buyer's roads, serving and billing |
 | `Utilities.tariff` per owner | server sim/utilities.ts | the tariff slider |
 | `Utilities.supplied(b, util)` | server sim/utilities.ts | water, sewer and broadband gates |
 | `UTIL_KINDS` by utility | shared/src/utilities.ts | the next networks reuse the field, solver and links |
@@ -379,7 +390,7 @@ blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`
 | U6 | Events: roadworks with temporary lights, storms (needs weather) | faults and crews built in U2 |
 | U7 | Underground view: utility depths, chips, chambers, dark sections | |
 | U8 | Gas and heat pumps; gas explosions via `Fires.explode` | |
-| U9 | Interconnector contracts between players | hook only |
+| U9 | Contracts between players | **power built in M8** (docs/multiplayer-land.md "Built: M8"): a posted tariff a unit capped at grid import, the provider's reach over the buyer's streets, hourly billing; water when U3 lands; interconnector links over another player's land later |
 | U10 | London: Battersea, Bankside, the gasholders, Abbey Mills, the BT Tower, the Tideway | |
 
 Each phase lands in the Showcase (`SHOWCASE_FEATURES`, shared/src/demo/showcase.ts) with tour stops.

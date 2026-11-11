@@ -409,6 +409,7 @@ ui.mineByName = (name) => world.myPlayer?.name === name;
 ui.mayEditByName = (name) => !world.spectate && (world.sandbox || world.myPlayer?.name === name);
 net.on('utilState', (m) => power.setState(m));
 net.on('utilLinks', (m) => power.setLinks(m));
+net.on('services', (m) => power.setContracts(m.contracts)); // M8: a provider's power reach over its buyers' streets
 ui.onRefuseAddon = (x, y, addon, on) => { net.send({ t: 'refuseAddon', x, y, addon, on }); setTimeout(() => { if (selectedBuilding) net.send({ t: 'inspect', x: selectedBuilding[0], y: selectedBuilding[1], full: true }); }, 300); };
 ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
 ui.onGatewayLimit = (x, y, on) => { net.send({ t: 'gatewayLimit', x, y, on }); setTimeout(() => { if (selectedBuilding) net.send({ t: 'inspect', x: selectedBuilding[0], y: selectedBuilding[1], full: true }); }, 300); };

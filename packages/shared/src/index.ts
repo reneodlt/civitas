@@ -46,6 +46,7 @@ export * from './history';
 export * from './worldmap';
 export * from './parcelops';
 export * from './landdeals';
+export * from './contracts';
 export * from './waterways';
 export * from './boats';
 export * from './ferry';

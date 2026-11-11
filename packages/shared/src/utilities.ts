@@ -175,6 +175,11 @@ export interface UtilEnv {
   sub(x: number, y: number): number;
   aux(x: number, y: number): number;
   owner(x: number, y: number): string | null;
+  /**
+   * Service contracts (docs/multiplayer-land.md M8): whether `owner`'s network may also walk the road at (x, y), which
+   * another player owns, because that player's parcel has a power contract with them. Absent: never (section 3.1).
+   */
+  access?(owner: string, x: number, y: number): boolean;
 }
 /** A node: its door, kind and owner. `key` is the door's numeric key (utilKey), the id it has on the wire. */
 export interface UtilNode { key: number; x: number; y: number; kind: number; owner: string }
@@ -183,12 +188,12 @@ export const utilKey = (x: number, y: number) => (x + 0x8000) * 65536 + (y + 0x8
 export const utilUnkey = (k: number): [number, number] => [Math.floor(k / 65536) - 0x8000, k - Math.floor(k / 65536) * 65536 - 0x8000];
 const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
 
-/** Whether supply from `owner`'s node may run along the tile: a road on their own land or on unowned land. */
+/** Whether supply from `owner`'s node may run along the tile: a road on their own land or on unowned land, or on a buyer's land under a power contract (M8). */
 const passable = (env: UtilEnv, owner: string, x: number, y: number) => {
   const t = env.tile(x, y);
   if (t === undefined || !isRoad(t)) return false;
   const o = env.owner(x, y);
-  return o === null || o === owner;
+  return o === null || o === owner || (env.access !== undefined && env.access(owner, x, y));
 };
 
 /**

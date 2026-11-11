@@ -908,3 +908,120 @@ refuse:check, value:check, roadrules:check, land:check and finance:check still p
   goes to its vote.
 - A closure objection decides the notice at once rather than at its end; the closure marker tints only its first tile.
 - The site is reserved against building and zoning; a road laid over it meanwhile makes the approved plan lapse (refunded).
+
+## Built: M8 service contracts (2026-11-11)
+
+Section 7 "Services" for **refuse and power**, in every world (as M7; a showcase refuses the intents). Water waits for
+the water network (docs/utilities.md U3): `ServiceId` and `regionalPrice` take it then. Code: `shared/src/contracts.ts`
+(types, `CONTRACTS` tuning, `regionalPrice`; browser-safe), `server/src/sim/contracts.ts` (`Contracts`, one per game:
+tariffs, contracts, reach, billing, the midnight, the cut-off rule, the save), hooks in `server/src/sim/utilities.ts`
+(`Utilities.contracts`, `PowerContracts`; `UtilEnv.access` in `shared/src/utilities.ts`), `server/src/sim/refuse.ts`
+(`Refuse.contracts`, `RefuseContracts`), `server/src/net.ts` (the `svc` intent, the `services` and `svcQuotes` messages,
+the bulldozer), the ledger lines `contracts` and `services` (`protocol.ts`), the snapshot field `contracts`, and the
+client's `client/src/services.ts` (in `mapmode.ts`; `client/src/utilities.ts` follows power contracts in its reach).
+Check: `npm run contracts:check` (`server/src/contracts-check.ts`).
+
+**Wire.**
+
+```
+client  { t: 'svc', op: 'tariff', service, price }            post or change a tariff; price null withdraws it
+        { t: 'svc', op: 'sign', id, service, provider, days, estate? }
+        { t: 'svc', op: 'notice', contract }                   either party
+        { t: 'svc', op: 'quote', id }                          the providers that could serve parcel id
+server  { t: 'services', tariffs, contracts, regional }        tariffs public, contracts to their two parties
+        { t: 'svcQuotes', id, quotes: [{ provider, service, price, reach, why? }] }
+```
+
+**Tariffs and the regional cap.** A provider posts one price per service: refuse **a home a day**, power **a unit**. It
+needs something to serve from (a refuse site of its own; a substation or grid supply point). No tariff may be above the
+regional reference price; a higher one is refused with the cap in the reason:
+
+| Service | Regional supplier | Reference price |
+| --- | --- | --- |
+| refuse | the old waste depots (a hashed share of industry), at their fee of `REFUSE.feePerHome` ($0.60) a weekly collection | $0.60 / 7 ≈ $0.086 a home a day |
+| power | grid import through the buyer's own substation | `UTIL.importPrice`, $0.06 a unit |
+
+Tariffs are public (every client has them; a neighbour's parcel panel shows its owner's). Changing or withdrawing one
+leaves running contracts at the price they were signed at.
+
+**Contracts.** The owner of a parcel (a tenant counts: they are `Parcel.owner`) signs it, or its whole estate, up with a
+provider that has a tariff posted and **reaches** the land, for `CONTRACTS.minDays`-`maxDays` (3-60) days, at the posted
+price fixed for the term. Reach: refuse, one of the provider's sites within the rounds' reach (`REFUSE.reach`, 40) of
+the land; power, one of the provider's substations whose reach, allowed onto these parcels' roads, takes in a road on
+them (the same `utilityReach`). One contract per service per parcel; not in administration; at most 40 running per
+buyer. No acceptance step: a posted tariff is an offer to anyone in reach. Either side gives **3 days' notice**
+(`CONTRACTS.noticeDays`): the contract ends at the third midnight (or at its term, if sooner), both are told, and the
+service falls back to the regional supplier. A contract **binds the land** (as M7's pacts): sold, it carries on with the
+new owner (told by toast); parcels gone or now the provider's leave it; with none left it ends.
+
+**Access to the buyer's roads, that service only.**
+
+- *Power.* `UtilEnv.access(owner, x, y)` is the one exception to section 3.1 of docs/utilities.md: the provider's reach
+  may walk roads on parcels under a power contract with it (and on to public roads beyond, never onto a third player's).
+  `Utilities.serve` gives a building on such a parcel the provider's nearest node where it reaches, else its owner's own;
+  the growth gate (`supplied`) follows. The field is rebuilt when a power contract starts or ends.
+- *Refuse.* A player's refuse site now collects only its owner's homes and the Commons' or unowned homes, **unless** a
+  refuse contract sends a neighbour's homes to it; the old depots (the regional service) and sites on public or Commons
+  land collect anyone's, as before. The rounds plan each district's due homes by who may collect them (`collectorAt`:
+  the contract's provider, else the owner) and pick each group's depot (`depotsNear(..., who)`); a contracted group
+  takes the provider's site with room before anything else and falls back to the regional depots. The lorry already
+  drove any street; what changes is whose site's round the buyer's homes are on. Sweepers are unchanged (by district).
+
+**Billing, hourly.** Refuse at tick `CONTRACTS.billAt` (47) of each game hour: the contract's price / 24 for every built
+home on its parcels. Power at the utilities' solve (tick 41): the units the provider's network supplied to the buyer's
+buildings that hour, at the contract's price; units not supplied are not billed. The buyer pays `services` ("Services
+bought from neighbours"), the provider is paid `contracts` ("Service contracts sold"), both running lines. For power the
+buyer still collects its residents' bills (`bills`) as before, so at the default tariff it keeps the margin between
+$0.06 and the contract price; the provider pays the fuel or import for what it supplies. A home its provider's lorry
+empties pays no per-collection fee (the contract covers it).
+
+**Nobody cuts a service mid-contract** (two enforcements):
+
+1. *Refused:* while refuse contracts run, the provider may not bulldoze its **last** refuse site; while a power contract
+   runs, it may not bulldoze a substation that served contracted buildings at the last solve (`Contracts.cutRefusal`,
+   in `net.ts`'s bulldozer, with the reason and "give notice first"). Refuse sites and substations cannot be mothballed
+   (the recovery plan mothballs only staffed services and yards), so the bulldozer is the only switch.
+2. *The provider pays the fallback:* when service lapses anyway (its sites full or unstaffed, a fault), the buyer does
+   not pay for it: power is billed only for units supplied, and a contracted home the regional depots had to empty has
+   its $0.60 fee paid by the provider, not the buyer (`Refuse.arrive`).
+
+**Client.** The world map's parcel panel gains a **Services** block (`services.ts`): contracts on the parcel (provider or
+buyer, price, until when, paid so far, **Give notice**); on your own parcel, for each service without a contract, the
+regional price and each provider's quote (asked for on selecting the parcel, `svcQuotes`) with how far under the
+regional price it is and **Sign** (or why it does not reach), a term field and "the whole estate"; and **Your tariffs…**
+(a price per service, at most the regional one; Post, Change, Withdraw). The market box lists your running contracts
+with Give notice. The power overlay follows the power contracts its player is a party to.
+
+**Persistence.** `Snapshot.contracts` (optional; `ContractsSave`: the next id, tariffs, contracts with their price, term,
+notice and paid total), absent while there are none. Saves from before M8 load with none. `UtilitiesSave.contracts`, the
+U9 hook, stays empty.
+
+**Measured.** contracts:check, all 47 pass: a refuse tariff with no site, and both services above the regional price,
+refused; tariffs seen by every neighbour; before a contract Bob's homes go to Cy's old depot, not Ada's composting site
+next door; quotes in reach; short terms and other people's land refused; signed, the round is Ada's site's with all four
+kerb stops on Bob's street, the lift costs Bob no fee, and the regional depot emptying them charges Ada $0.60; an hour's
+bill 4 × $0.07 / 24 = $0.0117 on both ledgers, and the game bills it hourly by itself; the price held at $0.07 when Ada
+drops her tariff to $0.02 and raises it to $0.085; her only site cannot be bulldozed; a refuse contract leaves Bob's
+homes without power, a power contract puts Ada's reach on his street (to (58, 10)) but never on Cy's beyond, his homes
+supplied and billed 0.34 units × $0.05, he still collects his residents' bills, refuse still goes by the refuse
+contract; the substation serving him cannot be bulldozed; notice from either side holds two midnights and ends at the
+third, the power reach off his street and his bins back at the regional depot, the substation free to go; a snapshot
+round trip and a save without the field. typecheck (with local:check), build, refuse:check, finance:check,
+market:check, planning:check and value:check pass; the utilities probe (`loadtest/utilities.ts`) 59/59;
+`loadtest/mobile.ts --grade recycling` (2×2, seed 1) empties 67 and 59 homes on its two weekdays, as before M8 (the test
+city is the Commons', so no player's site is restricted), at 4.7 and 4.3 ms a tick.
+
+**Differences from the design.**
+
+- Water has no network yet, so no water contracts; gas likewise. Tenders ("refuse collection for 400 homes for 10
+  days", providers bid) are later: a contract is signed at a posted price, with no acceptance step and no capacity cap
+  (a provider with too many signed homes fills its sites and pays the regional fee for the overflow).
+- The refuse reference price is the old depots' fee spread over a week ($0.086 a home a day). It is honest about what a
+  buyer's fallback costs, but low against a site's running cost (M4: about $1-2 a home a day), so refuse contracts are
+  about neighbourliness and nuisance more than profit until that fee is retuned.
+- For power the regional fallback is grid import through the buyer's own substation: a buyer with none has no power
+  after a contract ends (its buildings stay at level 1, as before power).
+- "Access to the buyer's roads" for refuse vehicles changes whose round the homes are on; lorries already drove every
+  street. Trunk links still may not cross another player's land.
+- The cut-off rule covers bulldozing; selling the land under a site, or letting its staff go, is covered by the provider
+  paying the fallback instead.
