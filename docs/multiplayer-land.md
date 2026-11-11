@@ -1,0 +1,333 @@
+# Multiplayer land: cash, neighbours, planning, services and roads (design)
+
+Rich, 2026-11-11: "Let's consider the minimal requirements for multiplayer. Let's see if we can really minimize their
+starting cash so that maybe they can build anywhere / everywhere and possibly sell land to other players later. This way
+they need to balance themselves the area types but other players can build unpopular units (garbage collection etc)
+near other players high price residences etc ... come up with some options for the multiplayer experience that allows
+for tactical play but not just blatant griefing." Then, over the same conversation: kinds of nuisance and amenity that
+combine into a value, cleaner grades of nuisance buildings, alternatives to "the polluter pays the neighbour", planning
+notices with a residents' vote, selling services to neighbours, fewer roads, marketing in planning fights, and a
+prevailing wind (which grew into `docs/weather.md`).
+
+This is a design. It changes no game code. Every question in section 10 has been decided (2026-11-11); the decisions are
+written into the sections.
+
+## 1. Today
+
+- **Money.** A new player starts with `START_MONEY` ($20,000); a frontier start with `FRONTIER_MONEY` ($18,000) and a
+  free 32×32 charter (`shared/src/constants.ts`).
+- **Land.** `LAND_PRICE_PER_TILE` is a flat $10, bought as rectangles up to 48 tiles a side. After the first parcel, new
+  land must share an edge with land you own, and a purchase may not wall anyone in (`shared/src/landrules.ts`). There
+  is no market: selling and transferring parcels is a follow-up in `docs/world-map.md`.
+- **Building.** Only on your own parcels. Anyone may lay a road on unclaimed land for `PUBLIC_ROAD_COST` ($20), and
+  anyone may bulldoze one (README roadmap, "Griefing controls").
+- **Road upkeep.** `ROAD_UPKEEP` ($0.50 a tile a day) is charged to the parcel owner for roads inside the parcel
+  (`World.roadUpkeepOf`). Public roads on unclaimed land are in no parcel, so nobody pays for them.
+- **Neighbours.** Nothing measures what is built next door. A home's appeal (`homeScore` in
+  `server/src/sim/motivation.ts`) reads the parcel's tax rate, service coverage, parks, room, building level, distance
+  and commute; how tall a neighbourhood grows is a hash of its 7×7 cell (`Simulation.ambition`) plus the learning lift.
+  A refuse depot beside a rival's homes does nothing to them today.
+- **Services between players.** Utilities bill per owner at a tariff (`docs/utilities.md` 3.5, $0.06 a unit by default,
+  the same as grid import) and a network reaches only its owner's roads and public roads, never another player's
+  streets. Refuse depots are a hashed share of industrial buildings (`server/src/sim/refuse.ts`).
+- **Opinion.** Campaigns plant beliefs about parcels, estates, buildings and study (`docs/adverts.md`,
+  `docs/motivation.md`): posters, TV, big screens, word of mouth, regret and cynicism, contrarians, fly-posting, focus
+  groups.
+- **Accounts.** Sign-in (`docs/accounts.md`) gives one mayor per account on the live world.
+
+## 2. Principles
+
+Griefing is when an action costs the victim far more than the actor and the victim has no answer. Every mechanic here
+is held to five tests:
+
+1. **It costs the actor in proportion.** No cheap action does lasting harm.
+2. **The harm has a ceiling.** Nobody can wipe a neighbour out.
+3. **The victim has an answer.** Buy the land between, screen, object, campaign, re-route.
+4. **It is visible in advance.** Plumes, impact zones and notices are shown before anything is built.
+5. **There is a positive-sum alternative.** Trading services, land and agreements pays better than fighting.
+
+## 3. Land and money (decisions 1-4)
+
+- **A free homestead and little cash** (decided). A new player on a shared world gets a free 16×16 homestead and about
+  $3,000 instead of $20,000. Numbers to be tuned with player bots (section 9, M1). Frontier and local starts keep their
+  own tuning.
+- **Land priced by what is near it.** Wilderness costs $1-2 a tile; land near valuable land costs more: the price is the
+  base times the land value of section 4 averaged over the rectangle. Being early somewhere pays when newcomers buy from
+  you (section 7).
+- **Separate outposts allowed** (decided). The "must share an edge" rule goes; "no walling in" stays, and each outpost
+  must be at least 8×8 so nobody buys one-tile spite strips.
+- **An empty-land tax** (decided). Land with nothing built on it (no road, zone or building) pays a small daily charge,
+  a share of its price. It pauses after the owner has been away 3 days, so a holiday does not ruin anyone. Built-on
+  land pays nothing extra: it already pays upkeep.
+- **Self-assessed prices that anyone may buy at** (Harberger-style, on empty land only): **held back** (decided). Revisit
+  only if the empty-land tax does not stop hoarding.
+- **Abandoned land.** After a long absence (30 days for empty land, longer for built-on land) land goes back on the
+  market and the proceeds go to the owner's treasury.
+
+## 4. Neighbourhood value: nuisance and amenity (decisions 5-7)
+
+### Kinds
+
+| Kind | Comes from | Spread |
+| --- | --- | --- |
+| Noise | industry, busy roads, rail, runways, late venues | short; falls off fast; blocked by buildings and tree belts; leans downwind |
+| Air and smell | landfill, smoking industry, incinerators | long; a downwind plume (`docs/weather.md` section 3) |
+| Heavy traffic | measured lorry counts per road tile | along the roads it uses |
+| Hazard | fuel depots, chemical works, fire risk | medium |
+| Disorder | late venues, empty and derelict buildings | short; police coverage lowers it |
+| Eyesore | derelict lots, scrapyards, pylons | very short; screening removes it |
+| Green | parks, trees, water, open country | medium |
+| Quiet | the absence of noise and heavy traffic | derived, nothing stored |
+| Access | shops, jobs and stops in walking distance | along the street network |
+| Services | the existing service coverage | exists |
+| Culture and prestige | landmarks, theatres, high-level neighbours | medium |
+
+### Nuisance follows use (decided)
+
+A nuisance building gives off nuisance in proportion to what it actually handles: tonnes through a refuse site, lorries
+through a yard, flights off a runway, staff on shift in a works. Its customers must be real (the builder's own homes, or
+a neighbour's under a contract, section 6). A decoy tip with nothing coming in costs upkeep and gives off nothing.
+Mothballed buildings give off nothing. A building left unused runs down and is cleared.
+
+Nuisance also spreads evenly over the builder's own land: a tip on your border spoils your own border too.
+
+### Combining (decided)
+
+Amenities add, with less each time; nuisances multiply, each taking a share off:
+
+```
+value = base × (1 + Σ saturate(wᵢ × amenityᵢ)) × Π (1 − wⱼ × nuisanceⱼ)
+```
+
+One severe nuisance cannot be bought off with a park. The weights are the household's own: the six motivation values
+(`docs/motivation.md` section 3) map onto the kinds (Family weights hazard and disorder heavily; Adventure barely minds
+noise; Money cares most about price). A noisy area is not worthless: it is cheaper housing for people who mind noise
+less. A tile's published value uses the average household's weights.
+
+### What value drives (decided: two steps)
+
+- **Step 1.** Value steers who chooses to move in (a new term in `homeScore`, per household weights) and how tall a
+  neighbourhood grows (it raises or lowers `ambition`). Land prices (section 3) follow it. No money changes hands.
+- **Step 2, later.** House prices and rents: households get budgets, value sets what a home costs, and parcel tax may
+  become a share of value. This changes every tuned number in `docs/early-game-audit.md`, so it waits for step 1 to
+  settle.
+
+### Storage and cost
+
+Kinds are kept per 4×4-tile cell as bytes in a per-chunk field (8×8 cells a chunk), recomputed for a chunk when a
+source in reach changes and smoothed once a game hour, in the way `UtilityField` caches per chunk. Smell plumes read the
+weather's long-run wind (`docs/weather.md`) for planning and the day's wind for complaints. The client gets the field
+for an overlay (a "Neighbourhood" map layer with one tab per kind) as chunk bytes, sent like the congestion bytes.
+
+## 5. Cleaner grades and boundary limits
+
+### Grades
+
+Each nuisance building comes in grades: cleaner grades cost more to build and give off less, and some earn money back.
+Refuse is the first family:
+
+| Grade | Build | Running | Gives off |
+| --- | --- | --- | --- |
+| Open tip | very low | low, plus the landfill levy on every tonne | heavy smell, heavy traffic, eyesore |
+| Lined landfill | medium | medium, plus the levy | medium smell and traffic |
+| Recycling centre | medium | partly paid back by selling materials | noise and traffic, little smell |
+| Green composting or digester | high | sells gas or compost | light smell, some traffic |
+| Incinerator that makes power | high | paid back by power sales | smoke, unless fitted with scrubbers |
+
+Add-ons for any nuisance building: an enclosed building, screening with trees or earth banks (less noise and eyesore),
+restricted hours (no night noise, less throughput) and a lorry route. Neighbours already have an answer to lorries: a
+lorry ban on their own streets (`docs/roads.md`, street rules), whose detour the tool already works out.
+
+### Instead of "the polluter pays the neighbour"
+
+Rich found paying the neighbour unrealistic. Three mechanisms replace it (decided):
+
+1. **A landfill-style levy into a regional fund.** Every tonne landfilled, and every unit of smoke, pays a levy into a
+   world fund, not to anyone. This is how real landfill tax works, and it is what makes green recycling cheaper to run
+   than a tip. The fund pays the upkeep of adopted roads (section 8).
+2. **Limits at the boundary.** A permit sets the most of each kind any building may push onto someone else's land (the
+   long-run average at their boundary). To build near a boundary you buy a cleaner grade, add screening or move back.
+   The rule is objective and needs no vote; it is also the ceiling of principle 2: neighbours together can lower a
+   parcel's growth by at most one level.
+3. **A community offer during planning** (section 6): the applicant may offer a park, a one-off payment, cheaper service
+   or shorter hours to win the vote. Paying the neighbour becomes the applicant's choice, not a rule.
+
+Residents also react on their own: unhappy ones complain, leave, and lower the builder's credibility (section 6).
+
+## 6. Planning and opinion (decisions 8-13)
+
+### Notices
+
+- **What needs planning.** A building of a nuisance kind whose expected impact zone (the area where it changes value by
+  more than a threshold) reaches someone else's land. The ghost shows the zone before placing. A nuisance build that
+  stays inside the builder's own land needs no vote (decided): its residents can still complain, leave and lower the
+  builder's credibility.
+- **The notice.** One game day (8 minutes real time) (decided). A site sign goes up, the affected mayors get a toast,
+  and the local news carries it. Citizens vote, so the neighbour need not be online.
+- **The voter list** is frozen when the notice is filed: residents of the impact zone, of every owner. Homes built
+  during the notice do not vote.
+- **Results:** approved; approved with conditions (hours, screening, a lorry route); or refused. A refused plan may be
+  filed again after a cooling-off period, and only with a changed design: a cleaner grade, more distance or a better
+  offer.
+
+### The vote
+
+```
+lean    = the resident's own expected impact (the game's true estimate, weighted by what they care about)
+        + their belief about the plan (campaigns, word of mouth)
+        + the community offer, and jobs for them or their household
+turnout = how strongly they feel × a loss-aversion factor (opponents vote more readily) + turnout campaigns
+```
+
+Loss aversion is the not-in-my-backyard effect: a plan mildly good for many and bad for a few loses unless the
+applicant makes its case.
+
+### Campaigning on a plan
+
+A plan is a fifth campaign target, `plan` (`docs/adverts.md` section 3), with its own claim table. Each claim names a
+value and a nuisance or amenity kind, so the game can check it against the truth:
+
+| Value | For | Against |
+| --- | --- | --- |
+| Money | "Lower bin charges for {parcel}" | "House prices will fall" |
+| Family | "A new park for {parcel}" (the offer) | "Fumes by the school" |
+| Getting on | "{n} skilled jobs" | "Who'd want to live next to a tip?" |
+| Staying put | "Local jobs for local people" | "Keep {parcel} green" |
+| Free time | "Recycling on your doorstep" | "Lorries on our streets all day" |
+| Something new | "The cleanest plant in the region" | |
+
+A turnout claim ("Have your say: vote by {day}") raises turnout among those who already lean your way, without moving
+anyone.
+
+Channels:
+
+| Channel | Reach | Cost | Notes |
+| --- | --- | --- | --- |
+| Posters (exist) | commutes past the slot | rent a day | good when the zone sits on busy routes |
+| Leaflets and doorsteps (new) | households on the voter list | per household | precise and dear; only inside the zone |
+| Public meeting (new) | attendees of an event at a nearby venue | venue hire | a strong nudge; both sides speak, so the truer case gains more |
+| TV (exists) | everyone | high | mostly wasted outside the zone |
+| Local news (new rows in `sim/news.ts`) | everyone | free | written by the game: the application, the meeting, the result |
+| Word of mouth (exists) | friends | free | well-connected residents carry it |
+
+Focus groups (`cul2`) show a live poll with a margin of error. Without them a player campaigns blind.
+
+### Credibility (decided)
+
+One number per player per map sector. Regret attributed to a player's claims in a sector lowers it; claims borne out
+raise it. It multiplies the strength of that player's campaigns there. A plan's claims are the fastest-checked in the
+game: everyone in the zone lives with the result. If "odour-free composting" smells, the applicant's next plan there
+starts weaker; if "house prices will fall" proves false, the objector pays instead. An applicant may change the plan
+during the notice (cleaner grade, screening, a better offer), which changes the true impact and unlocks a "We listened"
+claim.
+
+### Guards (decided)
+
+- **Only people with a stake campaign on a plan:** the applicant and owners of land in the impact zone.
+- **A spending cap per side**, scaled to the plan's size.
+- **Diminishing returns** from the existing freshness rule.
+- **Fly-posting** keeps its limits (`docs/adverts.md` section 7); during a notice, a discovered fly-post over a planning
+  poster also costs credibility.
+- **Claims about someone else's land must be true when posted.** False claims about your own land are allowed and
+  backfire through regret, as now. A claim about a rival's land is checked against the truth when posted and refused if
+  false; if it becomes false while running, it is taken down and the poster fined.
+- **No new planning campaigns in the last game hour** before the vote (optional; tune in play).
+
+### Opinion about areas
+
+Beliefs may also target an area's kinds ("Docklands is up-and-coming", "Eastfield is noisy"). In the short run, who
+moves in follows belief; in the long run, the truth. That allows a land play with real risk: buy cheap land by a tip,
+win planning to replace the tip with composting, market the area, sell to newcomers. Overhype it and regret drags it
+back and costs credibility.
+
+## 7. Trading land and services (decision 14)
+
+### Land
+
+- **Sell or lease a parcel** on the map: a listing with an asking price, offers, and a transfer when accepted (the
+  `docs/world-map.md` follow-up). Split and merge already exist to cut the piece to sell.
+- **Covenants**, set by the seller and binding every later owner, enforced by the build rules: "no heavy industry",
+  "stays a park", "no building over {n} levels". Land with a covenant sells for less.
+- **Leases** pay rent each day for a fixed term; buildings on leased land revert at the end, or are bought at book
+  value.
+- **Neighbour pacts:** two owners agree a buffer strip and share its cost; either can end it with notice.
+
+### Services (decided)
+
+- **A fixed public tariff.** The provider sets a price per unit (power, water, gas) or per home per day (refuse). A
+  neighbour signs up a parcel or an estate. The contract runs for a fixed term at a fixed price; either side may leave
+  with 3 game days' notice; nobody can cut a service off mid-contract.
+- **A regional fallback caps the price.** A regional supplier always exists at a reference price (like today's grid
+  import). No provider may charge more, so nobody is held hostage; a provider wins by being cheaper or cleaner.
+- **Access to the buyer's roads.** Signing up lets the provider's network and vehicles use the buyer's streets, for that
+  service only: the exception to "a network never reaches another player's streets".
+- **Billing** runs hourly through the existing utility bills, with a line per contract in both ledgers.
+- **Tenders, later:** "refuse collection for 400 homes for 10 days", and providers bid.
+
+## 8. Roads (decisions 15-17)
+
+- **The builder pays the upkeep** of every road they lay, on their own land or public (decided). This closes the spam
+  loophole: today a public road costs nobody anything after it is built.
+- **Unused roads fade** (decided). A road tile with no traffic and nothing built beside it for 5 game days starts to
+  revert to countryside, with no refund.
+- **Shared roads are adopted.** A public road that other players' traffic uses regularly is adopted by the regional
+  fund (paid by the levy, section 5): its builder stops paying upkeep and can no longer remove it freely.
+- **Buildings help pay for their roads.** Each building facing a road covers part of that tile's upkeep, so dense,
+  efficient streets pay for themselves and long empty ones lose money.
+- **Cheap tracks first.** A slow, cheap track that fades when unused, upgraded in place (the existing road-class
+  upgrade) once traffic justifies it.
+- **Removing roads: decided by use, not by every neighbour agreeing** (decided; a unanimous rule hands a permanent veto
+  to the most hostile neighbour or an abandoned account). A road no other player's traffic depends on is free to
+  remove. A road is protected when removing it would cut another player's land off from the gateways, or lengthen their
+  trips by more than a threshold (the detour sum the lorry-ban tool already computes). A protected road can be closed
+  when the closer first builds a replacement route (approved automatically), or after a closure notice to which no
+  affected mayor objects in time (silence is consent).
+
+## 9. Where it applies (decision 21) and phased plan
+
+Nuisance, value, grades, the levy and road upkeep apply in every world, private frontiers and local mode included: your
+own residents care. Planning votes, campaigns on plans, service contracts and land sales between players matter only in
+shared worlds. Spectate (showcase) worlds refuse every new intent, as today.
+
+| # | Subtask | Depends on | Main files |
+| --- | --- | --- | --- |
+| M1 | **The value field.** Kinds per 4×4 cell, per-chunk cache, sources from buildings and measured traffic (nuisance follows use); the Neighbourhood overlay; `homeScore` and `ambition` read it (step 1). A loadtest probe. | W1 of `docs/weather.md` for plumes (until then, round plumes) | new `sim/value.ts`, `sim/motivation.ts`, `sim/simulation.ts` (hot), `client` overlay |
+| M2 | **Land and money.** Homestead and start cash, value-priced land, outposts, the empty-land tax and its pause, abandoned land. Tune with player bots. | M1 | `shared/src/{constants,landrules,tuning}.ts`, `server/src/net.ts`, `sim/finance.ts` |
+| M3 | **Roads.** Builder-pays upkeep, fading roads, adoption, frontage share, protected roads and closure notices. Closes the README griefing item. | none | `world.ts` (`recountRoads`, upkeep), `net.ts` bulldoze, `shared/src/roadtool.ts` |
+| M4 | **Grades and limits.** Refuse grades and add-ons, the levy and the regional fund, boundary limits in the build check. | M1 | `shared/src/buildings/`, `sim/refuse.ts`, `sim/finance.ts` |
+| M5 | **Planning.** Impact zones, notices, the frozen list, the vote, conditions and cooling-off; the news rows; the planning panel. | M1, M4 | new `sim/planning.ts`, `sim/news.ts`, `protocol.ts`, client panel |
+| M6 | **Campaigns on plans.** The `plan` target and claims, leaflets, public meetings, turnout claims, spending caps, stake rule, truth check on claims about others' land, credibility per sector. | M5, adverts A4 | `shared/src/adverts.ts`, `sim/adverts.ts`, `sim/motivation.ts` |
+| M7 | **Land market.** Listings, offers, transfers, covenants, leases, pacts. | M2 | `shared/src/parcelops.ts`, `net.ts`, `client/src/mapmode.ts` |
+| M8 | **Service contracts.** Tariffs, terms, notice, the fallback cap, road access, ledger lines; refuse first, then power and water. Tenders later. | M4 | `sim/utilities.ts`, `sim/refuse.ts`, `sim/finance.ts` |
+| M9 | **Step 2: house prices and rents.** Household budgets, rents from value, tax on value; re-run the early-game audit. | M1-M2 in play | `sim/simulation.ts`, `sim/motivation.ts`, `sim/finance.ts`, `shared/src/tuning.ts` |
+
+M1 first: nothing else matters until a neighbour's choices reach you. M3 can run beside M1. A caution for every phase:
+growth demand and vacant jobs are world totals today (`docs/start-from-zero.md` section B), so neighbours already share
+demand; test with two or three player bots before tuning numbers.
+
+## 10. Decisions (Rich, 2026-11-11)
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Free 16×16 homestead and about $3,000 start cash | yes |
+| 2 | Separate outposts (drop "must share an edge", keep "no walling in") | yes |
+| 3 | Empty-land tax, paused after 3 days away | yes |
+| 4 | Self-assessed prices anyone may buy at, on empty land | held back |
+| 5 | Value as real house prices | in two steps: steering first, prices later |
+| 6 | Prevailing wind | yes (`docs/weather.md`) |
+| 7 | Multiplied nuisances, household weights | yes |
+| 8 | A vote on nuisance builds inside the builder's own land | no |
+| 9 | Notice of one game day | yes |
+| 10 | Only people with a stake campaign on a plan | yes |
+| 11 | Spending cap per side | yes |
+| 12 | Claims about others' land must be true | yes |
+| 13 | Credibility per player per sector | yes |
+| 14 | Service contracts: fixed tariff, regional cap, 3 days' notice, no cut-off | yes |
+| 15 | The builder pays upkeep on public roads | yes |
+| 16 | Unused roads fade after about 5 days | yes |
+| 17 | Road removal decided by use, not unanimity | yes |
+| 18-20 | Weather questions | see `docs/weather.md` section 7 |
+| 21 | Nuisance everywhere; planning, campaigns and contracts in shared worlds | yes |
+
+Still open, for the phases that need them: the empty-land tax rate, the boundary limit per kind, the plan-size scale of
+the spending cap, the adoption threshold for shared roads, and the abandoned-land periods. All are tuning, set in M2-M5.

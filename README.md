@@ -624,9 +624,13 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 - Binary wire format (the protocol is already flat numeric arrays for the hot
   messages, so this is mechanical).
 - Selling parcels and a market land value (subdividing and combining are on the world map), utilities, avenues and transit,
-  and a proper economy loop for commercial/industrial income.
+  and a proper economy loop for commercial/industrial income. Designed in docs/multiplayer-land.md: neighbourhood value
+  (nuisance and amenity), planning votes and campaigns, service contracts between players, a land market.
+- Weather and seasons (docs/weather.md): a seeded world weather with a prevailing wind, a season cycle each game week,
+  storms and floods.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
-- Griefing controls: public roads can currently be bulldozed by anyone.
+- Griefing controls: public roads can currently be bulldozed by anyone (docs/multiplayer-land.md section 8: the builder
+  pays upkeep, unused roads fade, roads others depend on are protected).
 
 ## Licence and contributing
 
