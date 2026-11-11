@@ -721,6 +721,14 @@ export type ClientMsg =
   | { t: 'adCampaign'; theme: number; claim: number; look: number; target?: AdTarget }
   | { t: 'adRent'; campaign: number; slots?: [number, number, number][]; near?: { x: number; y: number; n: number } }
   | { t: 'adEnd'; slots?: [number, number, number][]; campaign?: number; drop?: boolean }
+  /**
+   * M6 campaigns on planning applications (shared/src/campaigns.ts): a stakeholder `create`s a campaign on application
+   * `id` (a claim of PLAN_CLAIMS; `side` for a turnout claim), then puts it up as posters (adRent), leaflets `n`
+   * households on the roll, calls or speaks at a public `meeting`, buys a day of `tv`, or `end`s it
+   */
+  | { t: 'planCampaign'; id: number; act: 'create' | 'leaflet' | 'meeting' | 'tv' | 'end'; claim?: number; side?: 1 | -1; campaign?: number; n?: number; look?: number }
+  /** fly-post one of your campaigns over someone else's poster on slot [door x, door y, index] (docs/adverts.md section 7) */
+  | { t: 'adFlyPost'; campaign: number; slot: [number, number, number] }
   /** utilities (docs/utilities.md, server sim/utilities.ts): take down the trunk link through (x, y); pin a node as protected, or switch your grid import */
   | { t: 'utilLink'; op: 'remove'; x: number; y: number }
   | { t: 'utilNode'; x: number; y: number; protect?: boolean; importOn?: boolean };

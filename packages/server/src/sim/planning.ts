@@ -1,8 +1,8 @@
 import {
-  PLANNING, TICKS_PER_HOUR, TICKS_PER_DAY, LifeStage, KIND_NAMES, CIVIC_COST, REFUSE_ADDONS, BOUNDARY_LIMITS, VALUE_KINDS, VALUE_KIND_COUNT, ValueKind, VALUE_COUNT, Value,
+  PLANNING, CAMPAIGN, TICKS_PER_HOUR, TICKS_PER_DAY, LifeStage, KIND_NAMES, CIVIC_COST, REFUSE_ADDONS, BOUNDARY_LIMITS, VALUE_KINDS, VALUE_KIND_COUNT, ValueKind, VALUE_COUNT, Value,
   planImpact, planAt, withPlan, planningSourceOf, conditionCost, conditionNames, combineValue, valueWeights, hash2, workOf,
   planStructure, placedFromDoor, isRoad, isBridgeAux, packTile, terrainOf, tileKey,
-  type PlanImpact, type PlanAppDTO, type PlanKind, type PlanStatus, type Placed,
+  type PlanImpact, type PlanAppDTO, type PlanCampaignsDTO, type PlanKind, type PlanStatus, type Placed,
 } from '@msimcity/shared';
 import type { World, Citizen } from '../world';
 import type { Simulation } from './simulation';
@@ -52,6 +52,10 @@ export interface PlanApp {
   decided?: number; yes?: number; no?: number; result?: string;
   /** beliefs about this plan on the roll (citizen id -> -1..1): M6's campaigns write them; saved */
   beliefs?: Record<number, number>;
+  /** M6 turnout claims: per voter, the turnout boost among those leaning [For, Against]; saved */
+  turn?: Record<number, [number, number]>;
+  /** amended during the notice (unlocks the "We listened" claim) */
+  amended?: boolean;
 }
 /** A refused design, for the cooling-off and the changed-design rule. */
 interface Refused { by: string; x: number; y: number; kind: number; score: number; at: number }
@@ -74,6 +78,9 @@ export class Planning {
   /** counters since start (the check) */
   stats = { filed: 0, approved: 0, refused: 0, closures: 0 };
   private lastHour = -1;
+  /** M6 (sim/campaigns.ts): told when an application closes (before its beliefs go), and what the panel shows of its campaigning */
+  onClose: ((a: PlanApp) => void) | null = null;
+  campInfo: ((a: PlanApp) => PlanCampaignsDTO | undefined) | null = null;
 
   /** `on`: votes on nuisance builds (shared worlds). Closure notices work wherever road protection does. */
   constructor(private w: World, private sim: Simulation, readonly on: boolean) {
@@ -146,11 +153,19 @@ export class Planning {
   /** Add-on bits at the site with door (x, y) that are planning conditions (may not be taken off). */
   lockedAt(x: number, y: number): number { return this.locks.get(tileKey(x, y)) ?? 0; }
 
-  /** M6's campaigns: what citizen `cid` believes about plan `id` (-1 against .. 1 for). Plumbing: nothing calls it yet. */
+  /** M6's campaigns (sim/campaigns.ts): what citizen `cid` believes about plan `id` (-1 against .. 1 for). */
   believe(id: number, cid: number, b: number) {
     const a = this.apps.get(id);
     if (!a || a.status !== 'open') return;
     (a.beliefs ??= {})[cid] = Math.max(-1, Math.min(1, b));
+  }
+  beliefOf(id: number, cid: number): number { return this.apps.get(id)?.beliefs?.[cid] ?? 0; }
+  /** M6 turnout claims: raise `cid`'s turnout should they lean `side`'s way (1 For, -1 Against), by `v`, capped. Lean is untouched. */
+  boostTurnout(id: number, cid: number, side: 1 | -1, v: number) {
+    const a = this.apps.get(id);
+    if (!a || a.status !== 'open' || !(v > 0)) return;
+    const t = ((a.turn ??= {})[cid] ??= [0, 0]), k = side > 0 ? 0 : 1;
+    t[k] = Math.min(CAMPAIGN.turnoutMax, t[k] + v);
   }
 
   // ---- filing --------------------------------------------------------------------------------------------------
@@ -253,7 +268,7 @@ export class Planning {
     const extra = conditionCost(bits), more = newOffer - a.offer;
     if (!bits && !more) return 'Nothing to change: add a condition or raise the offer';
     if (spendable < extra + more) return `That needs $${Math.round(extra + more).toLocaleString('en-GB')} more than you can spend`;
-    a.mask |= bits; a.offer = newOffer; a.held += extra + more;
+    a.mask |= bits; a.offer = newOffer; a.held += extra + more; a.amended = true;
     if (extra) this.w.credit(by, -extra, 'build');
     if (more) this.w.credit(by, -more, 'planning');
     this.impacts.delete(a.id);
@@ -345,7 +360,8 @@ export class Planning {
 
   private close(a: PlanApp, status: PlanStatus, result: string) {
     a.status = status; a.result = result; a.decided = this.w.tick;
-    delete a.beliefs;
+    this.onClose?.(a);
+    delete a.beliefs; delete a.turn;
     this.changed = true;
   }
   private refund(a: PlanApp) {
@@ -433,7 +449,8 @@ export class Planning {
       const jobs = PLANNING.jobsGain * jobsShare * (hhOut.has(c.hh) ? 1 : PLANNING.jobsEmployed);
       const lean = own.get(c.id)! + belief + offer + jobs + PLANNING.noise * (hash2(c.id, a.id * 977 + 13) - 0.5);
       leans.set(c.id, lean);
-      const p = Math.min(PLANNING.turnoutMax, PLANNING.turnoutBase + PLANNING.turnoutGain * Math.abs(lean) * (lean < 0 ? PLANNING.lossAversion : 1));
+      const t = a.turn?.[c.id], boost = t ? CAMPAIGN.turnoutGain * (lean > 0 ? t[0] : t[1]) : 0; // M6 turnout claims: those already leaning that way
+      const p = Math.min(PLANNING.turnoutMax, PLANNING.turnoutBase + PLANNING.turnoutGain * Math.abs(lean) * (lean < 0 ? PLANNING.lossAversion : 1) + boost);
       if (hash2(c.id, a.id * 7919 + 1) < p) { if (lean > 0) yes++; else no++; }
       const o = w.parcelAt(c.hx, c.hy)?.owner;
       if (o) weights.set(o, (weights.get(o) ?? 0) + 1);
@@ -458,6 +475,7 @@ export class Planning {
         impact, affected: a.affected, voters: a.roll.length,
         ...(a.objections ? { objections: a.objections } : {}),
         ...(a.yes !== undefined ? { yes: a.yes, no: a.no } : {}), ...(a.result ? { result: a.result } : {}),
+        ...(() => { const camp = this.campInfo?.(a); return camp ? { camp } : {}; })(),
       });
     }
     return out;
@@ -466,7 +484,7 @@ export class Planning {
   private save(): PlanningSave | null {
     if (!this.apps.size && !this.refused.length && !this.locks.size) return null;
     return {
-      apps: [...this.apps.values()].map((a) => ({ ...a, roll: [...a.roll], affected: [...a.affected], ...(a.tiles ? { tiles: a.tiles.map(([x, y]) => [x, y] as [number, number]) } : {}), ...(a.beliefs ? { beliefs: { ...a.beliefs } } : {}) })),
+      apps: [...this.apps.values()].map((a) => ({ ...a, roll: [...a.roll], affected: [...a.affected], ...(a.tiles ? { tiles: a.tiles.map(([x, y]) => [x, y] as [number, number]) } : {}), ...(a.beliefs ? { beliefs: { ...a.beliefs } } : {}), ...(a.turn ? { turn: Object.fromEntries(Object.entries(a.turn).map(([k, v]) => [k, [v[0], v[1]]])) } : {}) })),
       nextId: this.nextId, refused: this.refused.map((r) => ({ ...r })),
       locks: [...this.locks].map(([k, m]) => { const [x, y] = k.split(',').map(Number); return [x, y, m] as [number, number, number]; }),
     };

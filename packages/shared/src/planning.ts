@@ -2,6 +2,7 @@ import { CAPACITY_TABLE } from './buildings/compiled';
 import { LEVEL_SLOTS } from './buildings/codes';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './constants';
 import { ValueKind, VALUE_KINDS, VALUE_KIND_COUNT, VALUE_CELL, valueKernels } from './value';
+import type { PlanCampaignsDTO } from './campaigns';
 import { REFUSE_GRADES, REFUSE_ADDONS, BOUNDARY_LIMITS, refuseCapacity, refuseEmission } from './refuse';
 
 /**
@@ -196,4 +197,6 @@ export interface PlanAppDTO {
   objections?: string[];
   /** once decided: the count and a sentence */
   yes?: number; no?: number; result?: string;
+  /** M6: the campaigning on it (shared/src/campaigns.ts), while open or lately decided */
+  camp?: PlanCampaignsDTO;
 }

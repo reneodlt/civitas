@@ -1025,3 +1025,186 @@ city is the Commons', so no player's site is restricted), at 4.7 and 4.3 ms a ti
   street. Trunk links still may not cross another player's land.
 - The cut-off rule covers bulldozing; selling the land under a site, or letting its staff go, is covered by the provider
   paying the fallback instead.
+
+## Built: M6 campaigns on plans (2026-11-11)
+
+Section 6's campaigning, credibility, guards and a first cut of opinion about areas. Code: `shared/src/campaigns.ts`
+(`PLAN_CLAIMS`, `CAMPAIGN` tuning, `claimTruth`, susceptibility and contrarians from hashes, the panel DTO; browser-safe),
+`server/src/sim/campaigns.ts` (`PlanCampaigns`, one per game, made by `game.ts` beside Adverts and Planning and ticked
+with the systems), small hooks in `sim/adverts.ts` (`createPlan`, `postersOf`, `planRent`, `areaTruth`, fly-posting),
+`sim/planning.ts` (`beliefOf`, `boostTurnout`, `onClose`, `campInfo`, the turnout boost in `vote`, `amended`) and
+`sim/motivation.ts` (`areaRep` in `homeScore`), the intents `planCampaign` and `adFlyPost` (`net.ts`), and the
+"Campaign" part of the client's planning panel. Check: `npm run campaign:check` (`server/src/campaign-check.ts`).
+
+**What was missing.** Adverts A4 (reach) and motivation M4-M5 (a general belief store, word of mouth day by day,
+regret) are not built, so there was no reach machinery to reuse. M6 builds a reach pass of its own, for plan campaigns
+only: only the roll's beliefs about a plan matter, so it walks rolls (tens to hundreds of voters) once a game hour,
+never the whole town. When A4 lands, its daily pass can call the same `apply` for plan campaigns.
+
+**The `plan` target and its claims.** A plan campaign is an advert campaign (`target: { kind: 'plan', id }`; `claim`
+indexes `PLAN_CLAIMS`), so its posters rent, wear, render and pay rent like any other. The Advertising tech is not
+needed, since a notice runs only one day. The table is section 6's, with one For and one Against claim per value. It
+adds three more:
+
+- "Odour-free: you won't know it's there" (Family, For);
+- "We listened: a changed plan" (only once the plan was amended);
+- the turnout claim "Have your say: vote by {day}".
+
+Each claim names a value, whose weight scales the nudge, and a test:
+
+- `low`: a kind of the M1 field stays low (rises by under 4%);
+- `high`: a kind is high (rises by 8% or more);
+- `falls`: the published value falls by 3% or more; `holds`: it does not;
+- a plain fact: `built`, `offer` or `amended`.
+
+{place} is the parcel where most of the roll lives, and {n} is the site's jobs. Artwork costs $60. The applicant may
+not campaign against their own plan.
+
+**Reach.** Once a game hour, for each open application with campaigns, each voter on the roll still in town sees:
+
+- *Posters.* A rented slot of one of its campaigns counts when it is within `seeReach` (2) tiles of the voter's home or
+  of a tile of their commute. For walkers that is the cached walking path; for drivers, the straight line from home to
+  work. At most 4 posters count per campaign. Each counts at its size's strength (0.22 a day for a panel up to 0.55 for
+  a big screen) × its condition: 1 fresh, 0 at wear 0.8, and -0.3 wrecked (a wrecked poster puts people off).
+- *TV.* A campaign that bought a day of spots ($600) reaches households with a set (85%, hashed) at 0.1 a day.
+
+The day's dose is split over the 24 passes. A nudge is the dose ×:
+
+- susceptibility (`0.3 + 0.7 × hash`);
+- the voter's weight on the claim's value (× 6, clamped to 0.3-2.5);
+- freshness (1 / (1 + days of exposure to this campaign));
+- the campaigner's credibility in the sector.
+
+Contrarians (6%) move the other way. The nudge moves the voter's belief about the plan (`Planning.believe`, -1..1)
+toward the campaign's side, and the vote reads it with `beliefGain` (0.5) as in M5.
+
+**Turnout claims** move nobody. The nudge goes into a boost per application, per voter and per side (`PlanApp.turn`,
+[For, Against], at most 0.5). The vote adds `turnoutGain` (1.5) × the boost of the side the voter already leans to
+their chance of voting. Contrarians are not moved to vote.
+
+**Leaflets and doorsteps** (`leaflet`) cost $6 for each household on the roll not yet leafleted by that campaign: all
+of them, or `n` in a hashed order. Each adult of the household on the roll gets a nudge of 0.45 (one day's exposure).
+Nobody off the roll is reached, so the leaflets stay inside the zone.
+
+**Public meetings** (`meeting`). The first campaign to ask hires a venue for 19:00, or for an hour before the vote if
+that is sooner; within a quarter hour of the vote it is refused. The venue is the nearest shop, office or civic
+building within 24 tiles of the zone's centre ($300), or a marquee in the neighbourhood ($450) when there is none.
+Others, of either side, may speak at it for $120. At the hour each resident on the roll comes with chance 0.4 (hashed)
+and gets a nudge of 0.7 from each speaker. When both sides speak, a side's nudge is × (0.4 + 1.2 × how true its claim
+is against the plan's expected impact on the roll's homes), so the truer case gains more.
+
+**Guards.**
+
+- Only stakeholders may campaign: the applicant and the owners in `affected` (other owners' land in the impact zone).
+- Each side has a spending cap of `capShare` (1) × the plan's cost (the building and its conditions), and at least
+  $1,000. Artwork, poster rent (new rent and each midnight's), leaflets, meetings, TV and fly-posts all count. An open
+  tip allows $1,500 a side; a recycling centre $6,000.
+- Diminishing returns come from freshness, as above.
+- No new campaigning (campaigns, posters, leaflets, meetings, TV) in the last game hour (`lastHourOn`, on).
+- Fly-posting (`adFlyPost`, docs/adverts.md section 7; there was none before) puts one of your campaigns over someone
+  else's poster for $40, 3 times a day. The renter's campaign stays underneath. It shows again when the fly-post is
+  found (20% a pass, hashed) or the fly-poster's campaign ends. A fly-post found over a planning poster during its
+  notice costs the fly-poster 0.15 credibility in the sector.
+- In administration, campaigning is refused.
+
+When an application closes, its campaigns end and their posters come down.
+
+**Credibility** is one number per player per map sector: `SECTOR_TILES`, the world map's 256-tile sector. It starts
+at 1, stays within 0.3-1.5, and is stored only where it is not 1. It multiplies every nudge the player's campaigns give
+there.
+
+When a plan is approved, its claims (all but turnout) are recorded with the zone's home cells and the field's kinds
+there (`Watch`). Two game days later each claim is judged; while the site is still being built it waits a day more, up
+to three times. A claim is judged by the rise of its kind over those cells since approval, by the published value's
+fall for price claims, or by its fact:
+
+- borne out: +0.08;
+- false: -0.25;
+- both × (0.5 + 0.5 × the share of the roll the campaign reached).
+
+The claimant gets a toast. A refused plan's claims are not judged, since nothing was built to live with.
+
+**Area claims** are four new rows of `AD_CLAIMS`, each with a kind: "{place} is up-and-coming" (access), "{place} is
+noisy", "{place} reeks" and "Leafy {place}".
+
+- An area claim may name someone else's parcel. It must then be true when posted: the mean of its kind over the
+  parcel's cells is at least `areaHigh` (6%). Adverts refuses it otherwise.
+- Once a game hour, a running area claim about someone else's land is checked again. If it is false, it is taken down
+  and its maker pays `falseFine` ($500) to the land's owner.
+- About your own land you may say anything. But once a game day, an overhyped claim with posters up costs its maker a
+  quarter of `credLoss` there.
+
+**Opinion about areas.** An area claim's posters build its parcel's reputation (-1..1): +0.05 a poster a day for
+praise, the same off for a slur, with at most six posters counted. It fades with a half-life of three game days.
+`Motivation.homeScore` adds `areaTerm` (0.15) × (the reputation at the candidate home - the reputation at the current
+one). Who moves in follows belief in the short run, and the field (the truth, through `hoodTerm`) in the long run.
+
+**Persistence.** The optional snapshot field `campaigns` holds:
+
+- plan campaigns, with their leafleted households, reach counts and TV;
+- meetings;
+- spend per application and side;
+- credibility;
+- claims awaiting judgement;
+- reputations.
+
+Beliefs and turnout boosts stay on the application (`planning`). Exposure counts (freshness) are not saved; after a
+load they start afresh. A save without the field loads with no campaigns and neutral credibility, and a world with
+nothing to keep saves without it.
+
+**Client.** In the planning panel, an open application shows its campaigning to everyone concerned:
+
+- each side's spend against the cap;
+- every campaign: side, owner, words, posters, TV, doors and voters reached;
+- the public meeting (a link);
+- the viewer's credibility there.
+
+A stakeholder starts a campaign from a list of claims. Only the applicant gets For claims, and the turnout claim takes
+the viewer's side. For their own campaigns they can leaflet the roll, call or speak at the meeting, buy TV or end the
+campaign. Posters go up from the Campaigns panel, where plan campaigns are listed with the rest. There is no
+fly-posting button yet; the intent exists.
+
+**Measured.** campaign:check passes 50 of 50:
+
+- *A For campaign.* A recycling centre at (50, 11) with a $500 offer loses 2-2 (roll 30). Ada runs "Recycling on your
+  doorstep" on Bob's four bus shelters. In six hours it reaches the 4 voters who live by them; a day of TV reaches 28;
+  leaflets go through all 15 doors ($90). The plan is approved 8-3, with $758 spent of $6,000.
+- *Turnout and Against.* An open tip at (24, 9) is refused 0-21 (roll 38). Bob's turnout leaflets leave every lean as
+  it was and set no belief, but 29 now vote against. The leaflets reach 36 voters, all on the roll: not a home built
+  during the notice, and not Dee's residents far away. Then "Fumes by the school" leaflets take the mean lean from
+  -0.197 to -0.351 (0-31).
+- *A meeting.* On the tip, Ada says "odour-free" (expected truth 0.00) and Bob "fumes by the school" (1.00). 16 of 38
+  come; Ada's nudges total 3.47 and Bob's 13.87.
+- *Guards.* Dee (no land in the zone) is refused, Cy (land in it) is not. The applicant cannot campaign against their
+  own plan, nor say "We listened" before amending. The Against side stops at $1,500, and the For side's spend is
+  counted apart. The last hour refuses new leaflets. Ada's fly-post over Bob's planning poster is found and costs her
+  0.15.
+- *Credibility.* A tip is approved with "odour-free" and "lorries on our streets all day" leaflets, built, and takes
+  refuse: smell at Bob's homes reaches 22%. Two days later Ada's credibility in the sector is 0.75, and Bob's too (no
+  lorries were measured). Ada's next leaflets in the sector buy 0.76 of the belief they would with clean credibility.
+  Elsewhere she is still at 1.
+- *Area claims.* "Bobton reeks" is refused while the tip is idle and accepted while it runs (Bobton's mean smell 8%).
+  Once the tip stops and the smell clears it is taken down within the hour, and Ada pays Bob $500. "Leafy Bobton"
+  posters raise Bobton's reputation to 0.047 in 12 hours; three days without posters halve it.
+- *Saves and determinism.* A save round trip keeps campaigns, doors, posters, spend, the meeting, beliefs, turnout
+  boosts and credibility; a save without the field loads clean. The same scene gives the same beliefs voter by voter.
+
+planning:check, refuse:check, value:check and finance:check still pass. The adverts probe passes 37 of 37 and the
+motivation probe 29 of 29.
+
+Cost: nothing runs per tick but the meetings' times. The hourly pass walks only the rolls of open applications that
+have campaigns (posters × route tiles per voter), and the area pass walks the campaigns.
+
+**Differences from the design.**
+
+- Reach is M6's own, hourly, over the roll only (A4 is not built). Word of mouth stays M5's (friends' own impact at the
+  vote), so a campaign's belief does not yet spread from friend to friend.
+- TV runs on the city channels with no studio or auction (A6's studio is not built): a flat $600 buys spots until the
+  vote.
+- Focus groups' live poll and the local news rows for meetings are not built; the meeting is announced by toast.
+- Regret is not per citizen: a judged claim moves its maker's credibility directly, weighted by how much of the roll
+  the campaign reached.
+- Claims are judged only for approved, built plans; a refused plan's scare claims are never tested.
+- Fly-posting has no "older than a day" rule (a notice lasts one day) and no client button.
+- Area claims change where movers look (`homeScore`) through a reputation per parcel, not through each citizen's
+  beliefs; ambition and land prices are unaffected.

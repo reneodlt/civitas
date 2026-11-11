@@ -253,8 +253,11 @@ export class Motivation {
       + w[Value.Time] * clamp(-1.5 * work / R)
       + w[Value.Adventure] * (clamp(d / R) + (same ? 0 : 0.2))
       + this.hoodTerm(w, host, from, b)
+      + (this.areaRep ? this.areaRep(b.x, b.y) - (from ? this.areaRep(from.x, from.y) : 0) : 0) // M6 area opinion: what people have heard of a place
       - 0.1 * d / R; // moving is a bother
   }
+  /** M6 area opinion (sim/campaigns.ts repAt): a home tile's parcel reputation from area claims, a short-run belief; set by PlanCampaigns. */
+  areaRep: ((x: number, y: number) => number) | null = null;
   private kw = new Float64Array(11);
   /** The neighbourhood value term of homeScore: VALUE.homeTerm × the log of b's value over the current home's, pressed and clamped. */
   hoodTerm(w: readonly number[], host: MotiveHost, from: Building | undefined, b: Building): number {

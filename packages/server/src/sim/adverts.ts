@@ -1,6 +1,6 @@
 import {
   AD, AD_CLAIMS, AD_RENTAL, AD_STRIDE, TICKS_PER_DAY, LifeStage, adHostAt, adSlotOpen, adSizeOf, adRent, adAge, adAreaRate, adSlotWorld, isScreenSlot,
-  claimText, kindManifest, signSource, signText, spendableMoney, tileKey, hasFeature, techFor,
+  claimText, kindManifest, signSource, signText, spendableMoney, tileKey, hasFeature, techFor, adSeed, adWear, isAreaClaim,
   type AdEnv, type AdHost, type AdTarget, type AdsDTO, type CampaignDTO,
 } from '@msimcity/shared';
 import type { World, Player } from '../world';
@@ -29,6 +29,8 @@ interface Rental {
   s: number;
   /** a demo's poster (seed): it keeps its age and costs nothing */
   keep?: boolean;
+  /** fly-posted (M6, docs/adverts.md section 7): `c` is the fly-poster's campaign; `o` the renter's, restored when found */
+  o?: number;
 }
 /** What the snapshot keeps (snapshot.ts `adverts`); absent in older saves. */
 export interface AdvertsSave { campaigns: Campaign[]; rentals: Rental[]; nextId: number; posted: string[] }
@@ -46,6 +48,12 @@ export class Adverts {
   stats = { created: 0, rented: 0, ended: 0, unpaid: 0, gone: 0, rentPaid: 0 };
   /** the simulation's cover at a home tile (police, fire and health 0-3; leisure tier 0-3), set by game.ts */
   cover: (x: number, y: number) => [number, number] = () => [0, 0];
+  /**
+   * M6 (sim/campaigns.ts): the guard on spending for a plan campaign's poster rent (`isNew`: a new rental, which may be
+   * refused; otherwise midnight's rent, only recorded), and the truth of an area claim about a parcel (claims about someone else's land must be true when posted).
+   */
+  planRent: ((c: Readonly<Campaign>, cost: number, isNew: boolean) => string | null) | null = null;
+  areaTruth: ((parcel: number, claim: number) => boolean) | null = null;
 
   private campaigns = new Map<number, Campaign>();
   private rentals = new Map<string, Rental>();
@@ -103,7 +111,7 @@ export class Adverts {
     if (own >= AD.maxCampaigns) return `You can run ${AD.maxCampaigns} campaigns at once: end one first`;
     const claim = AD_CLAIMS[Number(m.claim)];
     if (!claim || claim.theme !== Number(m.theme)) return 'Pick a claim for the theme';
-    const names = this.names(p, m.target, sandbox);
+    const names = this.names(p, m.target, sandbox, Number(m.claim));
     if (typeof names === 'string') return names;
     const text = claimText(Number(m.claim), names);
     if (!text) return claim.needs === 'building' ? 'That claim names a workplace: pick one of yours' : 'That claim names a place: pick one of your parcels';
@@ -120,10 +128,15 @@ export class Adverts {
   }
 
   /** The names a claim may use: the target parcel's (its estate shares it) or the target workplace's sign. */
-  private names(p: Player, t: AdTarget | undefined, sandbox: boolean): string | { place?: string; building?: string } {
+  private names(p: Player, t: AdTarget | undefined, sandbox: boolean, claim = -1): string | { place?: string; building?: string } {
     if (!t) return {};
     if (t.kind === 'parcel') {
       const q = this.w.parcels.get(Number(t.id));
+      // an area claim may name someone else's land, but only truly (M6); its own owner may say what they like (regret answers)
+      if (q && q.owner !== p.id && isAreaClaim(claim)) {
+        if (this.areaTruth && !this.areaTruth(q.id, claim)) return `That is not true of ${q.name}: a claim about someone else's land must be true when it goes up`;
+        return { place: q.name };
+      }
       if (!q || (q.owner !== p.id && !sandbox)) return 'Pick one of your own parcels';
       return { place: q.name };
     }
@@ -144,9 +157,9 @@ export class Adverts {
    * error, or how many went up and the first day's rent.
    */
   rent(p: Player, campaign: number, slots: [number, number, number][] | undefined, near: { x: number; y: number; n: number } | undefined): string | { n: number; cost: number } {
-    const need = this.locked(p);
-    if (need) return `${need} is needed before you can run adverts`;
     const c = this.campaigns.get(Number(campaign));
+    const need = c?.target?.kind === 'plan' ? null : this.locked(p); // a stakeholder answers a planning notice without the Advertising tech (M6)
+    if (need) return `${need} is needed before you can run adverts`;
     if (!c || c.owner !== p.id) return 'Pick one of your campaigns';
     let mine = 0;
     for (const r of this.rentals.values()) if (this.campaigns.get(r.c)?.owner === p.id) mine++;
@@ -161,6 +174,8 @@ export class Adverts {
       const h = adHostAt(this.env, x, y)!;
       const rent = adRent(adSizeOf(h, i));
       if (spendableMoney(p.money, p.devUnlimited) < rent) { err = `Not enough money for the first day's rent (${money(rent)})`; break; }
+      const cap = c.target?.kind === 'plan' && this.planRent ? this.planRent(c, rent, true) : null;
+      if (cap) { err = cap; break; }
       this.pay(p.id, x, y, rent);
       const rate = this.rateAt(x, y, h, i);
       this.rentals.set(rkey(x, y, i), { x, y, i, c: c.id, age: 0, rate, at: this.w.tick, placed: this.w.tick, s: h.slots[i * AD_STRIDE + 1] });
@@ -186,7 +201,10 @@ export class Adverts {
     if (campaign !== undefined) {
       const c = this.campaigns.get(Number(campaign));
       if (!c || c.owner !== p.id) return 'Pick one of your campaigns';
-      for (const [k, r] of this.rentals) if (r.c === c.id) { this.rentals.delete(k); n++; }
+      for (const [k, r] of this.rentals) {
+        if (r.c === c.id && r.o !== undefined) { r.c = r.o; delete r.o; n++; continue; } // a fly-post comes down: the renter's poster shows again
+        if (r.c === c.id || r.o === c.id) { this.rentals.delete(k); n++; }
+      }
       if (drop) this.campaigns.delete(c.id);
     }
     this.stats.ended += n;
@@ -249,7 +267,8 @@ export class Adverts {
     const due = new Map<string, number>();
     const ended = new Map<string, number>();
     for (const [k, r] of [...this.rentals]) {
-      const c = this.campaigns.get(r.c);
+      if (r.o !== undefined && !this.campaigns.has(r.o)) delete r.o; // the renter's campaign ended under a fly-post: the fly-poster keeps the slot
+      const c = this.campaigns.get(r.o ?? r.c);
       const p = c ? w.players.get(c.owner) : undefined;
       const h = adHostAt(this.env, r.x, r.y);
       if (!c || !p || !h || r.i >= h.slots.length / AD_STRIDE) {
@@ -265,6 +284,7 @@ export class Adverts {
         continue;
       }
       this.pay(p.id, r.x, r.y, rent);
+      if (c.target?.kind === 'plan') this.planRent?.(c, rent, false);
       due.set(p.id, (due.get(p.id) ?? 0) + rent);
       r.age = adAge(r.age, r.rate, r.at, tick);
       r.at = tick;
@@ -321,6 +341,76 @@ export class Adverts {
     this.changed = true;
     return true;
   }
+  // ---- M6: campaigns on planning applications, fly-posting (sim/campaigns.ts) --------------------------------
+
+  /** A campaign on planning application `app` (sim/campaigns.ts checked the stake, the guards and charged the artwork). */
+  createPlan(owner: string, theme: number, claim: number, text: string, look: number, app: number): Campaign | string {
+    if ([...this.campaigns.values()].filter((c) => c.owner === owner).length >= AD.maxCampaigns) return `You can run ${AD.maxCampaigns} campaigns at once: end one first`;
+    const c: Campaign = { id: this.nextId++, owner, theme, claim, look: Math.max(0, Math.floor(look) || 0) % 192, created: this.w.day, text, target: { kind: 'plan', id: app } };
+    this.campaigns.set(c.id, c);
+    this.stats.created++;
+    this.changed = true;
+    return c;
+  }
+  campaign(id: number): Readonly<Campaign> | undefined { return this.campaigns.get(id); }
+  /** End a campaign and take its posters down (the system: a decided plan, a false claim found running). */
+  drop(id: number): number {
+    const c = this.campaigns.get(id);
+    if (!c) return 0;
+    const n = this.end({ id: c.owner } as Player, undefined, id, true);
+    return typeof n === 'number' ? n : 0;
+  }
+  /**
+   * The rented slots showing these campaigns: where each poster is (its centre in tiles), its size and its condition
+   * now (wear), for the reach pass. A big screen never wears.
+   */
+  postersOf(ids: ReadonlySet<number>): { c: number; x: number; y: number; size: string; wear: number }[] {
+    const out: { c: number; x: number; y: number; size: string; wear: number }[] = [];
+    if (!ids.size) return out;
+    for (const r of this.rentals.values()) {
+      if (!ids.has(r.c)) continue;
+      const h = adHostAt(this.env, r.x, r.y);
+      if (!h || r.i >= h.slots.length / AD_STRIDE) continue;
+      const wp = adSlotWorld(h, r.i), size = adSizeOf(h, r.i);
+      out.push({ c: r.c, x: wp.x, y: wp.y, size, wear: isScreenSlot(h.slots, r.i) ? 0 : adWear(adAge(r.age, r.rate, r.at, this.w.tick), adSeed(r.x, r.y, r.i, r.o ?? r.c)) });
+    }
+    return out;
+  }
+  /** Posters showing campaign `id` (fly-posts included). */
+  postersCount(id: number): number { let n = 0; for (const r of this.rentals.values()) if (r.c === id) n++; return n; }
+  /**
+   * Fly-post campaign `campaign` of `p` over someone else's poster on slot (x, y, i) for CAMPAIGN.flyCost (charged by the
+   * caller): the rival's campaign is kept underneath and shows again when the fly-post is found or taken down. Returns
+   * the campaign covered, or a refusal.
+   */
+  flyPost(p: Player, campaign: number, x: number, y: number, i: number): string | { covered: number; owner: string } {
+    const c = this.campaigns.get(Number(campaign));
+    if (!c || c.owner !== p.id) return 'Pick one of your campaigns';
+    if (c.target?.kind !== 'plan') { const need = this.locked(p); if (need) return `${need} is needed before you can run adverts`; }
+    const r = this.rentals.get(rkey(x, y, i));
+    if (!r) return 'There is no poster on that frame to fly-post over: rent it instead';
+    if (r.o !== undefined) return 'That poster has already been fly-posted';
+    const under = this.campaigns.get(r.c);
+    if (!under || under.owner === p.id) return 'That poster is yours';
+    if (r.keep) return 'That poster is not to be touched';
+    r.o = r.c; r.c = c.id;
+    this.changed = true;
+    return { covered: under.id, owner: under.owner };
+  }
+  /** Fly-posts still up: slot, the fly-poster's campaign and the one underneath. */
+  flyPosts(): { x: number; y: number; i: number; c: number; o: number }[] {
+    const out: { x: number; y: number; i: number; c: number; o: number }[] = [];
+    for (const r of this.rentals.values()) if (r.o !== undefined) out.push({ x: r.x, y: r.y, i: r.i, c: r.c, o: r.o });
+    return out;
+  }
+  /** A fly-post found: the renter's poster shows again. */
+  unfly(x: number, y: number, i: number) {
+    const r = this.rentals.get(rkey(x, y, i));
+    if (!r || r.o === undefined) return;
+    r.c = r.o; delete r.o;
+    this.changed = true;
+  }
+
   /** Every rental, for the probe. */
   list(): Readonly<Rental>[] { return [...this.rentals.values()]; }
   campaignList(): Readonly<Campaign>[] { return [...this.campaigns.values()]; }

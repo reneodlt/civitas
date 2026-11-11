@@ -37,6 +37,7 @@ import type { Contracts } from './sim/contracts';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
+import type { PlanCampaigns } from './sim/campaigns';
 import type { News } from './sim/news';
 import { buildCost, type Planning } from './sim/planning';
 import type { Utilities } from './sim/utilities';
@@ -172,6 +173,8 @@ export class Net {
   fires: Fires | null = null;
   /** campaigns and rented ad slots (sim/adverts.ts): the 'ads' message and the advert intents; set by game.ts */
   adverts: Adverts | null = null;
+  /** campaigns on planning applications (sim/campaigns.ts, M6): the planCampaign and adFlyPost intents; set by game.ts */
+  campaigns: PlanCampaigns | null = null;
   /** the news story log (sim/news.ts): the 'news' message, media centres' building panels, the news overlay; set by game.ts */
   news: News | null = null;
   /** planning notices and the residents' vote, road closure notices (sim/planning.ts, docs/multiplayer-land.md M5); set by game.ts */
@@ -310,6 +313,8 @@ export class Net {
       case 'inspectDeceased': return this.send(c, { t: 'deceased', id: Number(m.id), info: this.sim.death.info(Number(m.id)) });
       case 'overlay': return this.setOverlay(c, Number(m.ch));
       case 'adCampaign': case 'adRent': case 'adEnd': return this.advert(c, m);
+      case 'planCampaign': return this.planCampaign(c, m);
+      case 'adFlyPost': { const r = this.campaigns?.flyPost(c.player, Number(m.campaign), m.slot) ?? 'Fly-posting is not available here'; return this.toast(c, r || 'Fly-posted: it shows until someone finds it', r ? undefined : 'info'); }
       case 'utilLink': case 'utilNode': return this.utility(c, m);
     }
   }
@@ -630,6 +635,34 @@ export class Net {
       this.toast(c, m.drop ? 'Campaign ended' : `${r === 1 ? 'A poster' : `${r} posters`} taken down`, 'info');
     }
     this.goals(c);
+  }
+
+  /** Campaigns on a planning application (sim/campaigns.ts, M6): make one, leaflet the roll, call or speak at a meeting, TV, end. */
+  private planCampaign(c: Client, m: Extract<ClientMsg, { t: 'planCampaign' }>) {
+    const pc = this.campaigns, p = c.player!;
+    if (!pc) return;
+    const camp = Number(m.campaign);
+    if (m.act === 'create') {
+      const r = pc.create(p, Number(m.id), Number(m.claim), m.side, Number(m.look) || 0);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, `Campaign ready: "${this.adverts?.campaign(r.id)?.text}". Put up posters (Campaigns panel), leaflet the roll or call a meeting`, 'info');
+    }
+    if (m.act === 'leaflet') {
+      const r = pc.leaflet(p, camp, Number(m.n) || 0);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, `Leaflets through ${r.households} door${r.households === 1 ? '' : 's'} on the roll (${r.people} voters) for $${r.cost}`, 'info');
+    }
+    if (m.act === 'meeting') {
+      const r = pc.meeting(p, camp);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, r.speakers.length > 1 ? `You will speak at the public meeting at ${r.hall}` : `Public meeting booked at ${r.hall}`, 'info');
+    }
+    if (m.act === 'tv') {
+      const r = pc.tv(p, camp);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, 'TV spots booked on the city channels until the vote', 'info');
+    }
+    if (m.act === 'end') { const r = pc.end(p, camp); return this.toast(c, r ?? 'Campaign ended: its posters come down', r ? undefined : 'info'); }
   }
 
   /** Whether this player may edit land owned by `owner`: their own, or anyone's in a sandbox (a test city or demo: nobody's work is protected). */
@@ -1732,6 +1765,7 @@ export class Net {
     if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
     // planning applications (sim/planning.ts, M5): the whole short list whenever it changed, and the mayors' notices
     if (this.planning?.changed) { this.planning.changed = false; this.broadcast({ t: 'planning', apps: this.planning.dtos(), ...(this.planning.on ? { votes: true } : {}) }); }
+    if (this.campaigns?.notices.length) for (const n of this.campaigns.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     if (this.planning?.notices.length) for (const n of this.planning.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // road rules (R4: turn bans, no entry, signal crossings): the whole short list whenever one changed; walk phases granted this tick
     if (w.rulesVersion !== this.rulesSent) { this.rulesSent = w.rulesVersion; this.broadcast({ t: 'roadRules', r: w.roadRulesList() }); }

@@ -4,7 +4,7 @@ Rich, 2026-10-19: "How about if buildings / areas had allocated advertising area
 marketing campaigns appear on, however, they are at risk of vandalism, graffiti etc. I am conscious of the refresh
 performance loop though." and "let's not forget tv adverts that we might have in fpv view and or on major city
 landmarks such as Times Square and/or Piccadilly Circus" (section 9). Design 2026-10-19. **Slice 1 (A1-A3 and a tutorial) is built: see "Built: slice 1"
-at the end; so is a first cut of A6's big screens, with Piccadilly Circus: see "Built: the big screens".** It stands on `docs/motivation.md` (values and beliefs): an advert is a way to plant a belief.
+at the end; so is a first cut of A6's big screens, with Piccadilly Circus: see "Built: the big screens"; campaigns on planning applications, area claims and fly-posting (multiplayer-land M6): see "Built: campaigns on planning applications".** It stands on `docs/motivation.md` (values and beliefs): an advert is a way to plant a belief.
 
 Code this touches: `shared/src/adverts.ts` (new: slot sizes, themes, claims, templates, `AD` tunables),
 `shared/src/buildings/` (the `adslot` op, `schema.ts`, `validate.ts`, `facade.ts`), `server/src/sim/adverts.ts` (new:
@@ -644,3 +644,31 @@ The TV studio, airtime auctions, evening reach, the ad break on the FPV TV and s
   - a screen rents at $40 and never wears;
   - the ring puts the campaign in its turn, house adverts in four, and the news in the last unrented one;
   - the ring is the same for every viewer and differs between buildings.
+
+## Built: campaigns on planning applications, area claims and fly-posting (M6, 2026-11-11)
+
+docs/multiplayer-land.md "Built: M6" has the whole of it. What it changed here:
+
+- **The `plan` target.** `AdTarget.kind` may be `'plan'`, with `id` the planning application. Such a campaign is made
+  by `Adverts.createPlan` (sim/campaigns.ts checks the stake and the guards first), and its `claim` indexes
+  `PLAN_CLAIMS` (shared/src/campaigns.ts), not `AD_CLAIMS`. Its posters rent, wear, draw and pay rent like any
+  campaign's. They need no Advertising tech, and their rent counts against the plan's spending cap (`planRent`). The
+  campaign ends, and its posters come down, when the application closes.
+- **Reach, for plan campaigns only.** Section 4 (A4) is still not built for ordinary campaigns. Plan campaigns reach
+  the frozen roll once a game hour through `Adverts.postersOf`:
+  - a poster within 2 tiles of a voter's home or commute;
+  - its size's strength × the condition from its wear (a wrecked poster backfires);
+  - freshness, susceptibility, the value weight and contrarians as in section 4;
+  - plus TV spots on the city channels, with no studio yet.
+- **Area claims.** Four rows join `AD_CLAIMS` with a value kind (`kind`, `high`, `good`): "{place} is up-and-coming",
+  "{place} is noisy", "{place} reeks" and "Leafy {place}".
+  - An area claim may name another owner's parcel, but only if it is true when posted: Adverts asks
+    `areaTruth`, the M1 field's mean of that kind over the parcel.
+  - It is checked again hourly. Once false, it is taken down and its maker fined $500, paid to the land's owner.
+  - Its posters build the parcel's reputation, which `homeScore` reads for a while.
+  - The client's claim picker still offers only your own parcels.
+- **Fly-posting** (section 7), as the intent `adFlyPost` with no button yet. You post one of your campaigns over
+  someone else's poster for $40, at most 3 a day. The rental keeps the renter's campaign underneath (`o`); the renter
+  keeps paying the rent, and the fly-poster gets the reach. A fly-post is found with chance 0.2 a game hour, and then
+  the renter's poster shows again. Found over a planning poster during its notice, it costs the fly-poster
+  credibility. There is no "older than a day" rule, and no "No fly-posting" parcel setting yet.
