@@ -17,6 +17,7 @@ import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, seedDemoGraves, fillDemo, seededRandom, worldHash } from './demo/seed';
 import { seedDemoAdverts } from './demo/adverts';
 import { PerfMonitor } from './perf/monitor';
+import { hankoAuth, devAuth } from './auth';
 import { demoFireDrills, demoFireRows, demoFireBlasts, demoBlackouts, demoFunerals } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -105,11 +106,27 @@ if (world) {
   else seedCommons(world, seedBuilt);
   console.log(`created new world with seed ${seed}`);
 }
+/** Sign-in (docs/accounts.md), for the live world only: demos and test cities are sandboxes and a SPECTATE showcase only looks.
+ *  HANKO_API_URL: Hanko (HANKO_AUDIENCE checks the token's `aud`). DEV_AUTH_USERS="user:pass,...": the built-in test sign-in for dev
+ *  and UAT (DEV_AUTH_SECRET keeps its tokens across restarts). Not both. ACCOUNTS_FILE moves the bindings; AUTH_CLAIM_EXISTING=1
+ *  lets the first account to ask for a name from before sign-in take that player (either provider). */
+const HANKO_API_URL = process.env.HANKO_API_URL?.trim() || undefined;
+const DEV_AUTH_USERS = process.env.DEV_AUTH_USERS?.trim() || undefined;
+if (HANKO_API_URL && DEV_AUTH_USERS) { console.error('HANKO_API_URL and DEV_AUTH_USERS are both set: choose one sign-in'); process.exit(1); }
+const authOn = !CHILD && !SPECTATE;
+const accountsFile = resolve(process.env.ACCOUNTS_FILE ?? join(dirname(DATA), 'accounts.json'));
+const claimExisting = ['1', 'true', 'yes'].includes((process.env.AUTH_CLAIM_EXISTING ?? '').toLowerCase());
+const DEV_AUTH = DEV_AUTH_USERS && authOn ? devAuth({ users: DEV_AUTH_USERS, secret: process.env.DEV_AUTH_SECRET || undefined, file: accountsFile, claimExisting }) : undefined;
+const AUTH = HANKO_API_URL && authOn ? hankoAuth({ apiUrl: HANKO_API_URL, audience: process.env.HANKO_AUDIENCE?.trim() || undefined, file: accountsFile, claimExisting })
+  : DEV_AUTH?.hook;
+const AUTH_CONFIG: ServerConfig['auth'] = !AUTH ? undefined : HANKO_API_URL ? { provider: 'hanko', apiUrl: HANKO_API_URL } : { provider: 'dev' };
+if (HANKO_API_URL && AUTH) console.log(`sign-in required: Hanko at ${HANKO_API_URL}`);
+if (DEV_AUTH) console.warn('sign-in required: DEV sign-in (DEV_AUTH_USERS), for testing only; never on a public server');
 // ---- http (serves the built client when present; the game's WebSockets share its port) -----------
 const http = createServer((req, res) => void serve(req, res));
 /** the game (game.ts): simulation, airports, rail and the protocol, here over WebSockets on the http port. Draft kinds and
  *  dev actions on a non-production server; a test city or demo is a sandbox (all tech, endless funds, no onboarding). */
-const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE }, SIM_STEPS);
+const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE, ...(AUTH ? { auth: AUTH } : {}) }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
 game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches light (sim/fires.ts; an A/B control)
 if (DEMO) {
@@ -160,7 +177,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     }));
   }
   if (req.url?.split('?')[0] === '/api/config') {
-    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO, ...(SPECTATE ? { demos: WARM_DEMOS } : {}) } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
+    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO, ...(SPECTATE ? { demos: WARM_DEMOS } : {}) } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}), ...(AUTH_CONFIG ? { auth: AUTH_CONFIG } : {}) };
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
     return res.end(JSON.stringify(cfg));
   }
@@ -171,6 +188,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
       return res.end(JSON.stringify({ servers: Array.isArray(j.servers) ? j.servers : [] }));
     } catch { return res.end('{"servers":[]}'); } // no file, or one that does not parse: an empty list, which the page says in words
   }
+  if (DEV_AUTH?.handle(req, res)) return;
   if (monitor.handle(req, res)) return;
   if (testCities?.handle(req, res)) return;
   if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }

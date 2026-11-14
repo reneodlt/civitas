@@ -581,10 +581,14 @@ export interface SiteDTO { x: number; y: number; kind: number; level: number; ta
  * welcome, and refuses every intent that changes it). `defaultDemo`: DEFAULT_DEMO=<id>, a page opened without
  * `?demo=`, `?ws=` or `?city=` goes to that demo instead of the live world. `defaultView`: DEFAULT_VIEW, the camera's opening shot.
  */
-export interface ServerConfig { /** this server also serves the offline build at /play/ (the home page's Play section links there) */ play?: boolean; spectate?: boolean; defaultDemo?: string; /** the demos a showcase with a `defaultDemo` allows (the default, WARM_DEMOS and KEEP_DEMOS); any other `?demo=` opens the default */ demos?: string[]; /** DEFAULT_VIEW: the opening camera shot for a page with no camera parameters, "x,y,dist,yaw,pitch[,hour]" (yaw and pitch in degrees; client camera.ts) */ defaultView?: string }
+export interface ServerConfig { /** this server also serves the offline build at /play/ (the home page's Play section links there) */ play?: boolean; spectate?: boolean; defaultDemo?: string; /** the demos a showcase with a `defaultDemo` allows (the default, WARM_DEMOS and KEEP_DEMOS); any other `?demo=` opens the default */ demos?: string[]; /** DEFAULT_VIEW: the opening camera shot for a page with no camera parameters, "x,y,dist,yaw,pitch[,hour]" (yaw and pitch in degrees; client camera.ts) */ defaultView?: string; /** sign-in is required to join this server's live world (docs/accounts.md): the provider and its API URL, for the page's sign-in element */ auth?: AuthConfig }
+/** How the page signs in (`ServerConfig.auth`): Hanko, or the built-in test sign-in for dev and UAT (DEV_AUTH_USERS; POST /api/auth/dev). */
+export type AuthConfig = { provider: 'hanko'; apiUrl: string } | { provider: 'dev' };
 
 export type ClientMsg =
-  | { t: 'hello'; name: string }
+  /** `token`: the sign-in session token (a Hanko JWT, docs/accounts.md), on a server whose config has `auth`; the name then only
+   *  names a new account's mayor */
+  | { t: 'hello'; name: string; token?: string }
   | { t: 'inspect'; x: number; y: number; full?: boolean }
   | { t: 'sites'; id: number }
   | { t: 'priority'; x: number; y: number; priority: number }
@@ -668,6 +672,9 @@ export type ClientMsg =
   | { t: 'utilNode'; x: number; y: number; protect?: boolean; importOn?: boolean };
 
 export type ServerMsg =
+  /** a server with sign-in did not let this hello in (docs/accounts.md): `signIn` = no token, or one that expired or did not check
+   *  out; `name` = a new account, which needs a mayor name (again, with `msg` saying why, when the one given cannot be had) */
+  | { t: 'auth'; need: 'signIn' | 'name'; msg?: string }
   | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
   | { t: 'chunk'; chunk: ChunkDTO }
   /** flat quads: x, y, packedTile, parcelId */

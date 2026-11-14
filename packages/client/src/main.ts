@@ -79,6 +79,7 @@ import { GravesView } from './render/graves';
 import { OverlayMap } from './render/overlayMap';
 import { ProblemsPanel, issueTipHtml } from './problems';
 import { OverlayMenu } from './overlays';
+import { SignIn } from './auth';
 
 // ---- renderer & scene ---------------------------------------------------------------------
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -1714,8 +1715,36 @@ async function connect(name: string) {
   }
   net.connect(name);
 }
+/**
+ * Sign-in (docs/accounts.md): a server whose /api/config has `auth` asks for it before its live world; demos, test cities, `?ws=`
+ * servers and local mode never do. The card shows Hanko's sign-in; once signed in the page connects with the session token and the
+ * name last used, and the server either welcomes the account's mayor or asks (an `auth` message) for a name or a fresh sign-in.
+ */
+const signIn = showcase.auth && !local && !viaWs && !demoParam && !cityParam ? new SignIn(showcase.auth, document.getElementById('loginForm')!) : null;
+async function signedJoin(s: SignIn) {
+  (window as any).msc.signOut = () => s.signOut();
+  const form = document.getElementById('loginForm') as HTMLFormElement, input = document.getElementById('nameInput') as HTMLInputElement;
+  document.getElementById('worlds')?.classList.add('hidden'); // the live world only: demos and test cities have their own links
+  let name = params.get('name') || localStorage.getItem('msimcity.name') || '';
+  input.value = name;
+  net.on('auth', (m) => {
+    if (m.need === 'name') return s.askName(m.msg);
+    void s.signIn(m.msg ?? 'Please sign in again.').then(() => net.hello(name));
+  });
+  form.onsubmit = (e) => { // the name step: a new account's mayor, said on the open socket
+    e.preventDefault();
+    const n = input.value.trim();
+    if (!n) return;
+    name = n;
+    localStorage.setItem('msimcity.name', n);
+    net.hello(n);
+  };
+  await s.signIn();
+  net.connect(name, s.token);
+}
 if (params.has('map')) mapMode.set(true); // ?map opens on the world map
-if (autoName) void connect(autoName);
+if (signIn) void signedJoin(signIn);
+else if (autoName) void connect(autoName);
 else {
   const picker = viaWs || demoParam || local ? null : new WorldPicker(document.getElementById('worlds')!, cityParam || remembered());
   const form = document.getElementById('loginForm')!;

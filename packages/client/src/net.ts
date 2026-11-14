@@ -77,6 +77,8 @@ export class NetClient {
   private sock: ClientSocket | null = null;
   private handlers = new Map<string, (m: any) => void>();
   private name = '';
+  /** the sign-in session token for each hello (auth.ts, docs/accounts.md), read afresh on every (re)connect; none on a server without sign-in */
+  private token: (() => string | undefined) | null = null;
   private closedByUs = false;
   private factory: () => ClientSocket;
   private wsUrl = '';
@@ -102,15 +104,16 @@ export class NetClient {
   /** Look at every incoming message without taking over its handler. */
   tap(fn: (m: ServerMsg) => void) { this.taps.push(fn); }
 
-  connect(name: string) {
+  connect(name: string, token?: () => string | undefined) {
     this.name = name;
+    this.token = token ?? null;
     this.closedByUs = false;
     this.open();
   }
   private open() {
     const sock = this.factory();
     this.sock = sock;
-    sock.onopen = () => { this.onStatus(true); this.send({ t: 'hello', name: this.name }); };
+    sock.onopen = () => { this.onStatus(true); this.sendHello(); };
     sock.onmessage = (data) => {
       const t0 = performance.now();
       const m = JSON.parse(data) as ServerMsg;
@@ -130,6 +133,12 @@ export class NetClient {
       this.onStatus(false);
       if (!this.closedByUs && sock.retry) setTimeout(() => this.open(), 1500);
     };
+  }
+  /** Say hello again on the open socket under another name (sign-in: a new account's mayor name, after an `auth` message asked). */
+  hello(name: string) { this.name = name; this.sendHello(); }
+  private sendHello() {
+    const token = this.token?.();
+    this.send({ t: 'hello', name: this.name, ...(token ? { token } : {}) });
   }
   send(m: ClientMsg) {
     if (this.sock?.open) this.sock.send(JSON.stringify(m));

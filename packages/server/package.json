@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@msimcity/shared": "*",
+    "jose": "^6.2.17",
     "ws": "^8.18.0"
   },
   "devDependencies": {

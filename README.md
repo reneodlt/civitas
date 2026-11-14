@@ -41,6 +41,10 @@ client, the offline build under `/play/` and the WebSocket on one port (default 
 mount `/data` to keep the world across restarts.
 
 Environment: `PORT`, `HOST`, `SEED` (new worlds only), `WORLD_FILE`, `STATIC_DIR`, `PLAY_DIR` (the offline build), `SERVERS_FILE` (the Multiplayer list), `GIT_SHA` (the home page footer's build id; a Docker build arg).
+Sign-in (`docs/accounts.md`): `HANKO_API_URL` asks for a Hanko sign-in before the live world (`HANKO_AUDIENCE` checks the token's audience);
+`DEV_AUTH_USERS="ana:pass,ben:pass"` is the built-in test sign-in for dev and UAT (`DEV_AUTH_SECRET` keeps its tokens across restarts).
+Accounts are bound to mayors in `ACCOUNTS_FILE` (default `accounts.json` beside the world file); `AUTH_CLAIM_EXISTING=1` lets a signed-in
+account take a mayor from before sign-in. Without either, the name typed is the identity, as before. `npm run auth:check` tests the flow.
 Dev knobs: `SIM_STEPS=10` fast-forwards (ten simulation ticks per interval),
 `SEED_BUILT=3` starts a new world with the Commons already built to that level,
 and a file named `RESET` next to the world file makes the next start discard it.
@@ -619,7 +623,8 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
 
 ## Roadmap
 
-- Real accounts (the name you type is your identity today; nothing is secured).
+- Accounts: sign-in with Hanko (or the dev sign-in) has landed for the live world (`docs/accounts.md`); in-game account
+  settings, parcel protection, rate limits and admin tools are still to come (the remaining list is in that doc).
 - Region sharding: one simulation process per block of chunks, a gateway that
   routes subscriptions, and citizen hand-off between shards.
 - Database-backed store (Postgres for parcels/players, chunk blobs in object

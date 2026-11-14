@@ -117,6 +117,13 @@ body.landing #c, body.landing #ui, body.landing #login { display: none; }
 #loginForm p { margin: 0 0 16px; color: var(--muted); line-height: 1.4; }
 #loginForm input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0,0,0,0.3); color: var(--fg); font: inherit; font-size: 15px; }
 #loginForm button { width: 100%; margin-top: 10px; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #07110c; font: inherit; font-weight: 700; cursor: pointer; }
+/* sign-in (auth.ts, docs/accounts.md): Hanko's element or the dev form above the name step, a reason line, a quiet sign-out */
+#signIn[hidden], #signInNote[hidden], #signOut[hidden] { display: none; }
+#signIn input + input { margin-top: 8px; }
+#signIn .devAuthTag { margin: 0 0 8px; font-size: 12px; color: #e8b04a; }
+#loginForm #signInNote { margin: 0 0 10px; color: var(--fg); }
+#loginForm #signOut { background: transparent; color: var(--muted); font-weight: 400; text-decoration: underline; }
+#signIn hanko-auth { --color: var(--fg); --brand-color: var(--accent); --background-color: transparent; --font-family: inherit; }
 @media (max-width: 700px) {
   #worldstats, #help { display: none; }
   #tools button { width: 42px; } #tools button span:not(.sw) { display: none; } #tools .tgroup { display: none; }
